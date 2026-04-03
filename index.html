@@ -1,0 +1,1124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quantum Ag — Inventory & Delivery Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#f8fafc;--card:#fff;--primary:#1e40af;--primary-light:#3b82f6;--primary-bg:#eff6ff;--border:#e2e8f0;--text:#1e293b;--text-secondary:#64748b;--success:#16a34a;--success-bg:#f0fdf4;--warning:#d97706;--warning-bg:#fffbeb;--danger:#dc2626;--danger-bg:#fef2f2;--purple:#7c3aed;--purple-bg:#f5f3ff;--orange:#ea580c;--orange-bg:#fff7ed;--cyan:#0891b2;--cyan-bg:#ecfeff;--sidebar-w:240px;--radius:8px}
+body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+.sidebar{position:fixed;top:0;left:0;width:var(--sidebar-w);height:100vh;background:#0f172a;color:#fff;padding:0;z-index:50;display:flex;flex-direction:column;transition:transform .3s}
+.sidebar-header{padding:20px;border-bottom:1px solid #1e293b}
+.sidebar-header h1{font-size:18px;font-weight:700;color:#fff}
+.sidebar-header p{font-size:11px;color:#94a3b8;margin-top:2px}
+.nav-items{flex:1;padding:8px;overflow-y:auto}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:6px;cursor:pointer;font-size:14px;color:#94a3b8;transition:all .15s;margin-bottom:2px}
+.nav-item:hover{background:#1e293b;color:#e2e8f0}
+.nav-item.active{background:var(--primary);color:#fff}
+.nav-item svg{width:18px;height:18px;flex-shrink:0}
+.main{margin-left:var(--sidebar-w);padding:24px;min-height:100vh}
+.page-header{margin-bottom:24px}
+.page-header h2{font-size:24px;font-weight:700;color:var(--text)}
+.page-header p{font-size:14px;color:var(--text-secondary);margin-top:4px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin-bottom:16px}
+.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+.card-header h3{font-size:16px;font-weight:600}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:24px}
+.kpi-card{background:var(--card);border:2px solid var(--border);border-radius:var(--radius);padding:18px 20px;cursor:pointer;transition:all .2s;position:relative}
+.kpi-card:hover{border-color:var(--primary-light);box-shadow:0 4px 12px rgba(30,64,175,.1)}
+.kpi-card.active{border-color:var(--primary);box-shadow:0 4px 16px rgba(30,64,175,.15)}
+.kpi-card .kpi-arrow{position:absolute;right:12px;top:50%;transform:translateY(-50%);opacity:.3;transition:opacity .2s}
+.kpi-card:hover .kpi-arrow{opacity:.7}
+.kpi-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary);margin-bottom:6px}
+.kpi-value{font-size:30px;font-weight:700}
+.kpi-sub{font-size:11px;color:var(--text-secondary);margin-top:4px}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:6px;font-size:13px;font-weight:500;cursor:pointer;border:1px solid transparent;transition:all .15s}
+.btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{background:#1e3a8a}
+.btn-secondary{background:#fff;border-color:var(--border);color:var(--text)}.btn-secondary:hover{background:#f1f5f9}
+.btn-success{background:var(--success);color:#fff}.btn-success:hover{background:#15803d}
+.btn-danger{background:var(--danger);color:#fff}.btn-danger:hover{background:#b91c1c}
+.btn-sm{padding:5px 10px;font-size:12px}
+.btn-icon{padding:6px;border-radius:6px;cursor:pointer;border:1px solid var(--border);background:#fff;display:inline-flex;align-items:center;justify-content:center}
+.btn-icon:hover{background:#f1f5f9}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:2px solid var(--border);font-weight:600;color:var(--text-secondary);font-size:11px;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap}
+td{padding:8px 12px;border-bottom:1px solid #f1f5f9;vertical-align:middle}
+tr:hover td{background:#f8fafc}
+.status-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:99px;font-size:11px;font-weight:600;white-space:nowrap}
+.status-paid{background:var(--success-bg);color:var(--success)}
+.status-sorted{background:var(--primary-bg);color:var(--primary)}
+.status-partial-sort{background:var(--warning-bg);color:var(--warning)}
+.status-partial-deliver{background:var(--orange-bg);color:var(--orange)}
+.status-shuttle{background:var(--purple-bg);color:var(--purple)}
+.status-waiting{background:var(--danger-bg);color:var(--danger)}
+.status-pending{background:#f1f5f9;color:#64748b}
+.status-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.dot-paid{background:var(--success)}.dot-sorted{background:var(--primary)}.dot-partial-sort{background:var(--warning)}
+.dot-partial-deliver{background:var(--orange)}.dot-shuttle{background:var(--purple)}.dot-waiting{background:var(--danger)}.dot-pending{background:#94a3b8}
+input,select,textarea{font-family:inherit;font-size:13px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;outline:none;transition:border .15s;width:100%;background:#fff}
+input:focus,select:focus,textarea:focus{border-color:var(--primary-light);box-shadow:0 0 0 3px rgba(59,130,246,.1)}
+.form-group{margin-bottom:12px}
+.form-group label{display:block;font-size:12px;font-weight:500;color:var(--text-secondary);margin-bottom:4px}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal{background:#fff;border-radius:12px;width:100%;max-width:600px;max-height:90vh;overflow-y:auto;box-shadow:0 25px 50px rgba(0,0,0,.25)}
+.modal-header{padding:20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.modal-header h3{font-size:18px;font-weight:600}
+.modal-body{padding:20px}
+.modal-footer{padding:16px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
+.tag{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:500;background:#f1f5f9;color:var(--text-secondary)}
+.group-row{background:#f0f9ff !important}
+.group-row td{font-weight:600;color:var(--primary);border-bottom:2px solid var(--primary-light)}
+.search-box{position:relative}
+.search-box input{padding-left:36px}
+.search-box svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:#94a3b8}
+.tabs{display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:20px}
+.tab{padding:10px 20px;font-size:13px;font-weight:500;color:var(--text-secondary);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s}
+.tab:hover{color:var(--text)}
+.tab.active{color:var(--primary);border-bottom-color:var(--primary)}
+.inv-cell{text-align:right;font-variant-numeric:tabular-nums}
+.inv-cell.negative{color:var(--danger);font-weight:600}
+.inv-cell.positive{color:var(--success)}
+.chip-select{display:flex;flex-wrap:wrap;gap:6px}
+.chip{padding:4px 12px;border-radius:99px;font-size:12px;cursor:pointer;border:1px solid var(--border);background:#fff;transition:all .15s}
+.chip.selected{background:var(--primary);color:#fff;border-color:var(--primary)}
+.inv-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.product-col{min-width:80px;max-width:120px}
+.drill-panel{background:#fff;border:2px solid var(--primary);border-radius:var(--radius);padding:20px;margin-bottom:20px;animation:slideDown .25s ease-out}
+@keyframes slideDown{from{opacity:0;max-height:0;padding:0 20px}to{opacity:1;max-height:2000px}}
+.drill-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border)}
+.drill-header h3{font-size:15px;font-weight:600;color:var(--primary)}
+.expand-row{cursor:pointer;transition:background .15s}
+.expand-row:hover td{background:var(--primary-bg)!important}
+.sub-table{margin:8px 0 8px 20px;border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.sub-table th{background:#f0f9ff}
+.year-select{display:flex;align-items:center;gap:8px;padding:8px 12px;margin:8px;border-radius:6px;background:#1e293b;font-size:12px;color:#94a3b8}
+.year-select select{background:#0f172a;color:#fff;border:1px solid #334155;border-radius:4px;padding:4px 8px;font-size:12px;width:auto}
+.camera-preview{width:100%;max-height:300px;border-radius:8px;background:#000;object-fit:cover}
+.photo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-top:12px}
+.photo-thumb{position:relative;aspect-ratio:4/3;border-radius:6px;overflow:hidden;border:1px solid var(--border)}
+.photo-thumb img,.photo-thumb video{width:100%;height:100%;object-fit:cover}
+.photo-remove{position:absolute;top:4px;right:4px;width:20px;height:20px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center}
+.sb-status{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:99px;font-size:12px;font-weight:500}
+.sb-connected{background:var(--success-bg);color:var(--success)}
+.sb-disconnected{background:#f1f5f9;color:#94a3b8}
+@media print{.sidebar,.no-print,.mobile-header{display:none!important}.main{margin:0!important;padding:20px!important}}
+@media(max-width:768px){.sidebar{transform:translateX(-100%)}.sidebar.open{transform:translateX(0)}.main{margin-left:0}.mobile-header{display:flex!important}.kpi-grid{grid-template-columns:repeat(2,1fr)}}
+.mobile-header{display:none;position:sticky;top:0;z-index:40;background:#0f172a;color:#fff;padding:12px 16px;align-items:center;justify-content:space-between}
+.mobile-header h1{font-size:16px;font-weight:600}
+.hamburger{background:none;border:none;color:#fff;cursor:pointer;padding:4px}
+.fade-in{animation:fadeIn .2s ease-out}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.toast{position:fixed;bottom:24px;right:24px;background:#0f172a;color:#fff;padding:12px 20px;border-radius:8px;font-size:13px;z-index:200;animation:slideUp .3s ease-out}
+@keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useCallback,useMemo,createContext,useContext,useRef} = React;
+
+// ── APP VERSION ──
+const APP_VERSION = '3.0';
+
+// ── MASTER DATA ──
+const ALL_PRODUCTS = [
+  {id:"401-25",name:"401 - 2.5 gal",price:77},{id:"meltdown-25",name:"Meltdown - 2.5 gal",price:58},{id:"meltdown-tote",name:"Meltdown - Tote",price:55.5},
+  {id:"biocast-max-25",name:"BioCast Max - 2.5 gal",price:94.5},{id:"biocast-max-tote",name:"BioCast Max - Tote",price:92},
+  {id:"fullsun-25",name:"Full Sun - 2.5 gal",price:35.5},{id:"fullsun-tote",name:"Full Sun - Tote",price:33.5},
+  {id:"relaxrx-25",name:"Relax Rx - 2.5 gal",price:44},{id:"relaxrx-tote",name:"Relax Rx - Tote",price:41.5},
+  {id:"amino-25",name:"Amino - 2.5 gal",price:45.5},{id:"amino-tote",name:"Amino - Tote",price:43},
+  {id:"hf12-25",name:"HF12 - 2.5 gal",price:19},{id:"hf12-tote",name:"HF12 - Tote",price:17},
+  {id:"zinc9",name:"Zinc 9%",price:17.5},{id:"zinc9-tote",name:"Zinc 9% - Tote",price:15.5},{id:"zinc9-25",name:"Zinc 9% - 2.5 gal",price:17.5},
+  {id:"boron7-tote",name:"Boron 7% - Tote",price:11.5},{id:"boron7-25",name:"Boron 7% - 2.5 gal",price:13.5},
+  {id:"bioboost-corn",name:"BioBoost Corn",price:1047},{id:"bioboost-soy",name:"BioBoost Soybeans",price:541.5},
+  {id:"humical",name:"HumiCal",price:11.5},{id:"blg",name:"BLG",price:44},
+  {id:"defend-corn",name:"Defend 601 Corn",price:1681.88},{id:"defend-sb",name:"Defend 601 SB",price:598},
+  {id:"prime-25",name:"Prime - 2.5 gal",price:15.5},{id:"prime-tote",name:"Prime - Tote",price:13.5},
+  {id:"kace-25",name:"K ACE - 2.5 gal",price:11.25},{id:"kace-tote",name:"K ACE - Tote",price:7.75},
+  {id:"biocast-25",name:"BioCast - 2.5 gal",price:52},{id:"biocast-tote",name:"BioCast - Tote",price:52},
+  {id:"restock-25",name:"RepleNish - 2.5 gal",price:76},{id:"sweet",name:"Sweet",price:17.7},
+  {id:"nforce",name:"NForce",price:22.5},{id:"ntrust",name:"Ntrust",price:26},
+  {id:"cornworx",name:"CornWorX",price:36},{id:"soyworx",name:"SoyWorX",price:9},
+  {id:"advance",name:"Advance",price:24},{id:"caboom",name:"CaBoom",price:36},
+  {id:"seaamino",name:"SeaAmino",price:32},{id:"respite",name:"Respite",price:58},
+  {id:"fixate",name:"Fixate",price:58},{id:"synergy",name:"Synergy",price:10.5},
+  {id:"melted-manure",name:"Melted Manure",price:4.5},{id:"piksi",name:"PiKSi Dust",price:600}
+];
+
+const ALL_CUSTOMERS = [
+  "Beebe Seed Farms","Brad Ferguson","Brad Williams","Brent Hopkins","Brian Sanderson",
+  "Brian Vech","Charles Emanuel & Sons","Chris Armstrong","Chris Kloke","Cliff Goff",
+  "Cody Weitzenkamp","Dan Mensik","Dave Baumert","DJ Mottl","Eddie Ruskamp",
+  "Elkhorn Valley Revocable Trust","Eric Chvatal","Ferguson Farms LLC","Four K Farms LTD",
+  "Jason Thiesen","Joe Knobbe","Jonathan Muehlich","Jordan Emanuel","Josh Faltys",
+  "Josh Hladik","Kavan Farms","Kody Karloff","Kratochvil Land & Cattle","Lanny Schmid",
+  "Lloyd Cuda","Matt Bailey","Matt Ortmeier","Matthew Soukup","Michael Elofson",
+  "Mike Schuler","Mitch Novacek","Nick Emanuel","Nick Kloke","Reznicek Farms",
+  "Robinson Meadowbrook","Ross Janak","Sam Schmidt","Seth Feala","Skye Sukstorf",
+  "Tate Emanuel","Thomas Sobota","Tim Shanahan","Tom Emanuel","Tom Sobota",
+  "Tony Birkel","Tyler Mensik","Tyler Rezac","Webster Ag"
+];
+
+const STATUS_OPTIONS = [
+  {value:"pending",label:"Pending",cls:"status-pending",dot:"dot-pending"},
+  {value:"paid",label:"Paid & Delivered",cls:"status-paid",dot:"dot-paid"},
+  {value:"sorted",label:"Sorted & Ready",cls:"status-sorted",dot:"dot-sorted"},
+  {value:"partial-sort",label:"Partially Sorted",cls:"status-partial-sort",dot:"dot-partial-sort"},
+  {value:"partial-deliver",label:"Partial Delivery",cls:"status-partial-deliver",dot:"dot-partial-deliver"},
+  {value:"shuttle",label:"Shuttle Filled",cls:"status-shuttle",dot:"dot-shuttle"},
+  {value:"waiting",label:"Waiting on Check",cls:"status-waiting",dot:"dot-waiting"}
+];
+const getStatus = v => STATUS_OPTIONS.find(s=>s.value===v)||STATUS_OPTIONS[0];
+
+// ── INITIAL DATA ──
+const INITIAL_DATA = {
+  inventory: {
+    "401-25":{starting:327.5,additions:[]},"meltdown-25":{starting:265,additions:[]},"meltdown-tote":{starting:60,additions:[]},
+    "biocast-max-25":{starting:360,additions:[]},"biocast-max-tote":{starting:2120,additions:[{date:"2025-12-01",qty:707,note:"Restock"}]},
+    "fullsun-25":{starting:285,additions:[]},"fullsun-tote":{starting:1060,additions:[]},
+    "relaxrx-25":{starting:460,additions:[]},"relaxrx-tote":{starting:90,additions:[]},
+    "amino-25":{starting:250,additions:[]},"amino-tote":{starting:1590,additions:[]},
+    "hf12-tote":{starting:1590,additions:[]},"hf12-25":{starting:60,additions:[]},
+    "zinc9":{starting:440,additions:[]},"zinc9-tote":{starting:680,additions:[]},"zinc9-25":{starting:60,additions:[]},
+    "boron7-tote":{starting:1855,additions:[{date:"2025-12-15",qty:110,note:"Added"}]},"boron7-25":{starting:127.5,additions:[]},
+    "bioboost-corn":{starting:0,additions:[]},"bioboost-soy":{starting:0,additions:[]},
+    "humical":{starting:265,additions:[]},"blg":{starting:0,additions:[]},
+    "defend-corn":{starting:0,additions:[]},"defend-sb":{starting:0,additions:[]}
+  },
+  orders: [
+    {id:"o1",customer:"Nick Emanuel",date:"2025-12-18",status:"shuttle",invoiced:false,products:{"biocast-max-tote":530,"relaxrx-tote":265,"amino-tote":400,"hf12-tote":530,"zinc9":569,"boron7-tote":530,"defend-corn":2,"defend-sb":2}},
+    {id:"o2",customer:"Tom Emanuel",date:"2025-12-18",status:"shuttle",invoiced:false,products:{"biocast-max-tote":225,"fullsun-tote":59.5,"amino-25":52.5,"hf12-tote":125}},
+    {id:"o3",customer:"Tate Emanuel",date:"2025-12-18",status:"shuttle",invoiced:false,products:{"biocast-max-tote":88,"fullsun-tote":81.5,"amino-25":51.5,"hf12-tote":140,"blg":10,"defend-sb":1}},
+    {id:"o4",customer:"Jordan Emanuel",date:"2025-12-18",status:"shuttle",invoiced:false,products:{"biocast-max-tote":144,"fullsun-tote":124,"amino-25":81,"boron7-tote":265}},
+    {id:"o5",customer:"Chris Armstrong",date:"2025-12-18",status:"pending",invoiced:false,products:{"biocast-max-25":50,"biocast-max-tote":265,"amino-tote":265,"hf12-tote":530,"zinc9-tote":265,"boron7-tote":265}},
+    {id:"o6",customer:"Matthew Soukup",date:"2025-12-18",status:"pending",invoiced:false,products:{"biocast-max-tote":195,"fullsun-25":62.5,"zinc9-tote":150,"boron7-tote":265}},
+    {id:"o7",customer:"Dan Mensik",date:"2025-12-16",status:"waiting",invoiced:false,products:{"biocast-max-tote":288,"fullsun-25":105,"fullsun-tote":471,"amino-25":30,"amino-tote":330,"hf12-tote":130,"hf12-25":20,"zinc9-tote":130,"zinc9-25":20,"boron7-tote":288}},
+    {id:"o8",customer:"Tyler Mensik",date:"2025-12-16",status:"waiting",invoiced:false,products:{"biocast-max-tote":162,"fullsun-tote":324,"amino-tote":200,"hf12-tote":135,"zinc9-tote":135,"boron7-tote":177}},
+    {id:"o9",customer:"Matt Ortmeier",date:"2026-01-30",status:"pending",invoiced:false,products:{"biocast-max-25":55}},
+    {id:"o10",customer:"Nick Kloke",date:"2025-12-18",status:"sorted",invoiced:false,products:{"401-25":20,"biocast-max-25":85,"biocast-max-tote":265}},
+    {id:"o11",customer:"Tom Sobota",date:"2025-12-16",status:"pending",invoiced:false,products:{"biocast-max-25":40,"relaxrx-25":20,"amino-25":40,"boron7-25":17.5}},
+    {id:"o12",customer:"Josh Faltys",date:"2026-04-02",status:"pending",invoiced:false,products:{"401-25":120,"biocast-max-tote":530,"amino-tote":795,"hf12-tote":675,"defend-corn":3,"defend-sb":4}},
+    {id:"o13",customer:"DJ Mottl",date:"2026-03-18",status:"pending",invoiced:false,products:{"401-25":10}},
+    {id:"o14",customer:"Seth Feala",date:"2025-12-16",status:"pending",invoiced:false,products:{"biocast-max-25":17.5}},
+    {id:"o15",customer:"Josh Hladik",date:"2026-03-18",status:"pending",invoiced:false,products:{"biocast-max-tote":135,"humical":265}},
+    {id:"o16",customer:"Greg Beebe",date:"2026-03-18",status:"pending",invoiced:false,products:{"biocast-max-25":100}},
+    {id:"o17",customer:"Lanny Schmid",date:"2026-03-18",status:"pending",invoiced:false,products:{"biocast-max-25":60,"boron7-25":60}},
+    {id:"o18",customer:"Ross Janak",date:"",status:"pending",invoiced:false,products:{"biocast-max-tote":265}}
+  ],
+  customerGroups: [
+    {name:"Webster Ag",members:["Tom Emanuel","Tate Emanuel","Jordan Emanuel"]},
+    {name:"Mensik",members:["Dan Mensik","Tyler Mensik"]}
+  ],
+  deliveries: [],
+  deliveryTickets: [],
+  settings: {
+    fiscalYearStart:{month:1,day:1},
+    fiscalYearEnd:{month:12,day:31},
+    archivedYears:[],
+    supabase:{url:'',anonKey:'',enabled:false}
+  }
+};
+
+// ── HELPERS ──
+const uid = () => 'id_'+Math.random().toString(36).slice(2,9)+Date.now().toString(36);
+const fmt = n => n==null?'—':typeof n==='number'?n.toLocaleString('en-US',{maximumFractionDigits:1}):n;
+const fmtDate = d => {if(!d)return '—';const dt=new Date(d+'T00:00:00');return isNaN(dt)?'—':dt.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})};
+const today = () => new Date().toISOString().split('T')[0];
+
+function getFiscalYear(dateStr, fyStart) {
+  if(!dateStr) return 'Undated';
+  const d = new Date(dateStr+'T00:00:00');
+  if(isNaN(d)) return 'Undated';
+  const year = d.getFullYear();
+  const month = d.getMonth()+1;
+  const day = d.getDate();
+  const sm = fyStart?.month||1; const sd = fyStart?.day||1;
+  if(sm===1&&sd===1) return String(year);
+  if(month>sm||(month===sm&&day>=sd)) return year+'-'+(year+1);
+  return (year-1)+'-'+year;
+}
+function getAvailableYears(orders, fyStart) {
+  const years = new Set();
+  orders.forEach(o=>years.add(getFiscalYear(o.date,fyStart)));
+  if(years.size===0) years.add(getFiscalYear(today(),fyStart));
+  return [...years].sort().reverse();
+}
+
+// ── ICONS ──
+const Icon = ({name,...p}) => {
+  const icons = {
+    dashboard:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>,
+    inventory:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 002 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0022 16z"/><path d="M3.27 6.96L12 12.01l8.73-5.05M12 22.08V12"/></svg>,
+    orders:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>,
+    truck:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="3" width="15" height="13" rx="1"/><path d="M16 8h4l3 3v5h-7V8z"/><circle cx="5.5" cy="18.5" r="2.5"/><circle cx="18.5" cy="18.5" r="2.5"/></svg>,
+    users:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>,
+    settings:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>,
+    plus:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+    x:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+    search:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
+    download:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>,
+    edit:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+    trash:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>,
+    check:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>,
+    menu:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>,
+    printer:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>,
+    chevron:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>,
+    back:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>,
+    upload:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>,
+    camera:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>,
+    archive:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>,
+    down:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>,
+    alert:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>,
+    cloud:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z"/></svg>,
+  };
+  return <span style={{display:'inline-flex',width:p.size||18,height:p.size||18}} {...p}>{icons[name]}</span>;
+};
+
+// ── SUPABASE LAYER ──
+let supabaseClient = null;
+function initSupabase(url, key) {
+  if(url && key && window.supabase) {
+    supabaseClient = window.supabase.createClient(url, key);
+    return supabaseClient;
+  }
+  return null;
+}
+
+// ── CONTEXT ──
+const AppContext = createContext();
+function useApp(){return useContext(AppContext);}
+
+function AppProvider({children}) {
+  const [data, setData] = useState(() => {
+    const sv = localStorage.getItem('quantumag_version');
+    const saved = localStorage.getItem('quantumag_data');
+    if(sv!==APP_VERSION||!saved){localStorage.setItem('quantumag_version',APP_VERSION);return INITIAL_DATA;}
+    const parsed = JSON.parse(saved);
+    if(!parsed.settings) parsed.settings = INITIAL_DATA.settings;
+    if(!parsed.deliveryTickets) parsed.deliveryTickets = [];
+    return parsed;
+  });
+  const [toast,setToast] = useState(null);
+  const [sbConnected,setSbConnected] = useState(false);
+  const [activeYear,setActiveYear] = useState(()=>getFiscalYear(today(),data.settings?.fiscalYearStart));
+
+  useEffect(()=>{localStorage.setItem('quantumag_data',JSON.stringify(data));localStorage.setItem('quantumag_version',APP_VERSION);},[data]);
+
+  // Supabase sync
+  useEffect(()=>{
+    const sb = data.settings?.supabase;
+    if(sb?.enabled&&sb?.url&&sb?.anonKey){
+      const client = initSupabase(sb.url,sb.anonKey);
+      if(client){
+        client.from('app_data').select('*').limit(1).then(({data:rows,error})=>{
+          if(!error){setSbConnected(true);showToast('Connected to Supabase');}
+          else{setSbConnected(false);}
+        });
+        const channel = client.channel('realtime_sync').on('postgres_changes',{event:'*',schema:'public',table:'app_data'},(payload)=>{
+          if(payload.new?.data){setData(d=>({...d,...JSON.parse(payload.new.data),settings:d.settings}));}
+        }).subscribe();
+        return ()=>{client.removeChannel(channel);};
+      }
+    } else {setSbConnected(false);}
+  },[data.settings?.supabase?.enabled,data.settings?.supabase?.url]);
+
+  const syncToSupabase = useCallback((newData)=>{
+    if(sbConnected&&supabaseClient){
+      const {settings,...syncData} = newData;
+      supabaseClient.from('app_data').upsert({id:1,data:JSON.stringify(syncData),updated_at:new Date().toISOString()});
+    }
+  },[sbConnected]);
+
+  const showToast = msg =>{setToast(msg);setTimeout(()=>setToast(null),3000);};
+
+  const updateData = (updater)=>{
+    setData(d=>{const n=typeof updater==='function'?updater(d):updater;syncToSupabase(n);return n;});
+  };
+
+  const updateInventory=(pid,field,val)=>{updateData(d=>({...d,inventory:{...d.inventory,[pid]:{...d.inventory[pid]||{starting:0,additions:[]},[field]:val}}}));};
+  const addInventory=(pid,add)=>{updateData(d=>{const inv=d.inventory[pid]||{starting:0,additions:[]};return{...d,inventory:{...d.inventory,[pid]:{...inv,additions:[...inv.additions,add]}}};});};
+  const addOrder=o=>{updateData(d=>({...d,orders:[...d.orders,{...o,id:uid()}]}));showToast('Order added');};
+  const updateOrder=(id,u)=>{updateData(d=>({...d,orders:d.orders.map(o=>o.id===id?{...o,...u}:o)}));};
+  const deleteOrder=id=>{updateData(d=>({...d,orders:d.orders.filter(o=>o.id!==id)}));showToast('Order deleted');};
+  const addDelivery=del=>{updateData(d=>({...d,deliveries:[...d.deliveries,{...del,id:uid()}]}));showToast('Delivery recorded');};
+  const updateDelivery=(id,u)=>{updateData(d=>({...d,deliveries:d.deliveries.map(dl=>dl.id===id?{...dl,...u}:dl)}));};
+  const addGroup=g=>{updateData(d=>({...d,customerGroups:[...d.customerGroups,g]}));};
+  const updateGroup=(i,g)=>{updateData(d=>({...d,customerGroups:d.customerGroups.map((x,j)=>j===i?g:x)}));};
+  const deleteGroup=i=>{updateData(d=>({...d,customerGroups:d.customerGroups.filter((_,j)=>j!==i)}));};
+  const updateSettings=s=>{setData(d=>({...d,settings:{...d.settings,...s}}));};
+  const saveDeliveryTicket=t=>{updateData(d=>({...d,deliveryTickets:[...d.deliveryTickets,{...t,id:uid(),savedAt:today()}]}));};
+
+  const fyStart = data.settings?.fiscalYearStart||{month:1,day:1};
+  const availableYears = useMemo(()=>getAvailableYears(data.orders,fyStart),[data.orders,fyStart]);
+  const archivedYears = data.settings?.archivedYears||[];
+  const visibleYears = availableYears.filter(y=>!archivedYears.includes(y));
+
+  const yearOrders = useMemo(()=>{
+    return data.orders.filter(o=>getFiscalYear(o.date,fyStart)===activeYear);
+  },[data.orders,activeYear,fyStart]);
+
+  const activeProducts = useMemo(()=>{
+    const used = new Set();
+    Object.keys(data.inventory).forEach(pid=>{const inv=data.inventory[pid];if(inv.starting>0||inv.additions.length>0)used.add(pid);});
+    data.orders.forEach(o=>Object.keys(o.products).forEach(pid=>{if(o.products[pid]>0)used.add(pid);}));
+    return ALL_PRODUCTS.filter(p=>used.has(p.id));
+  },[data]);
+
+  const activeCustomers = useMemo(()=>{
+    const used=new Set(data.orders.map(o=>o.customer));
+    return ALL_CUSTOMERS.filter(c=>used.has(c));
+  },[data]);
+
+  const getProductTotalSold=useCallback(pid=>data.orders.reduce((s,o)=>s+(o.products[pid]||0),0),[data.orders]);
+  const getProductDelivered=useCallback(pid=>data.deliveries.reduce((s,d)=>s+(d.products?.[pid]||0),0),[data.deliveries]);
+  const getProductAvailable=useCallback(pid=>{const inv=data.inventory[pid]||{starting:0,additions:[]};const added=inv.additions.reduce((s,a)=>s+a.qty,0);return inv.starting+added-getProductTotalSold(pid);},[data.inventory,getProductTotalSold]);
+  const getProductSoldNotDelivered=useCallback(pid=>getProductTotalSold(pid)-getProductDelivered(pid),[getProductTotalSold,getProductDelivered]);
+
+  const exportData=()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='quantum-ag-backup-'+today()+'.json';a.click();URL.revokeObjectURL(u);showToast('Exported');};
+  const importData=json=>{try{setData(JSON.parse(json));showToast('Imported');}catch(e){showToast('Invalid file');}};
+
+  return <AppContext.Provider value={{data,setData:updateData,activeProducts,activeCustomers,updateInventory,addInventory,addOrder,updateOrder,deleteOrder,addDelivery,updateDelivery,addGroup,updateGroup,deleteGroup,updateSettings,saveDeliveryTicket,getProductTotalSold,getProductDelivered,getProductAvailable,getProductSoldNotDelivered,exportData,importData,showToast,toast,sbConnected,activeYear,setActiveYear,availableYears,visibleYears,archivedYears,yearOrders,fyStart}}>{children}</AppContext.Provider>;
+}
+
+// ── MODAL ──
+function Modal({title,onClose,children,wide}){
+  return <div className="modal-overlay" onClick={onClose}><div className="modal" style={wide?{maxWidth:800}:{}} onClick={e=>e.stopPropagation()}>
+    <div className="modal-header"><h3>{title}</h3><button className="btn-icon" onClick={onClose}><Icon name="x"/></button></div>{children}
+  </div></div>;
+}
+
+// ══════════════════════════════════
+// ── DASHBOARD WITH DRILL-DOWNS ──
+// ══════════════════════════════════
+function Dashboard() {
+  const {data,activeProducts,yearOrders,activeYear,getProductAvailable,getProductTotalSold,getProductDelivered,getProductSoldNotDelivered} = useApp();
+  const [drillDown,setDrillDown] = useState(null);
+  const [expandedProduct,setExpandedProduct] = useState(null);
+
+  const productsNeeded = activeProducts.filter(p=>getProductAvailable(p.id)<0);
+  const productsAvail = activeProducts.filter(p=>getProductAvailable(p.id)>0);
+  const ordersReady = yearOrders.filter(o=>o.status!=='paid');
+  const ordersDelivered = yearOrders.filter(o=>o.status==='paid');
+
+  const kpis = [
+    {key:'needed',label:'Products Needed',value:productsNeeded.length,color:'var(--danger)',sub:'Negative inventory — need to order',icon:'alert'},
+    {key:'available',label:'Products Available',value:productsAvail.length,color:'var(--success)',sub:'In stock and ready',icon:'check'},
+    {key:'ready',label:'Orders to Deliver',value:ordersReady.length,color:'var(--warning)',sub:'Not yet marked delivered',icon:'truck'},
+    {key:'delivered',label:'Orders Delivered',value:ordersDelivered.length,color:'var(--success)',sub:activeYear+' completed',icon:'check'},
+    {key:'total',label:'Total Orders',value:yearOrders.length,color:'var(--primary)',sub:activeYear+' all statuses',icon:'orders'}
+  ];
+
+  const toggle = key => setDrillDown(drillDown===key?null:key);
+
+  // Find orders that consume a specific product
+  const ordersForProduct = pid => data.orders.filter(o=>(o.products[pid]||0)>0);
+
+  return (
+    <div className="fade-in">
+      <div className="page-header"><h2>Dashboard</h2><p>Year: {activeYear} — Click any card to drill down</p></div>
+      <div className="kpi-grid">
+        {kpis.map(k=>(
+          <div key={k.key} className={`kpi-card ${drillDown===k.key?'active':''}`} onClick={()=>toggle(k.key)}>
+            <div className="kpi-label">{k.label}</div>
+            <div className="kpi-value" style={{color:k.color}}>{k.value}</div>
+            <div className="kpi-sub">{k.sub}</div>
+            <div className="kpi-arrow"><Icon name="down" size={16}/></div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── DRILL-DOWN: Products Needed ── */}
+      {drillDown==='needed' && (
+        <div className="drill-panel">
+          <div className="drill-header"><h3>Products Needed — Negative Inventory</h3><button className="btn-icon" onClick={()=>setDrillDown(null)}><Icon name="x"/></button></div>
+          {productsNeeded.length===0?<p style={{color:'var(--text-secondary)',fontSize:13}}>All products are in stock.</p>:(
+            <table>
+              <thead><tr><th>Product</th><th style={{textAlign:'right'}}>Available</th><th style={{textAlign:'right'}}>Deficit</th><th style={{textAlign:'right'}}>Total Sold</th><th></th></tr></thead>
+              <tbody>
+                {productsNeeded.sort((a,b)=>getProductAvailable(a.id)-getProductAvailable(b.id)).map(p=>{
+                  const avail=getProductAvailable(p.id);
+                  const orders=ordersForProduct(p.id);
+                  const isExpanded=expandedProduct===p.id;
+                  return <React.Fragment key={p.id}>
+                    <tr className="expand-row" onClick={()=>setExpandedProduct(isExpanded?null:p.id)}>
+                      <td style={{fontWeight:500}}><Icon name={isExpanded?'down':'chevron'} size={14} style={{marginRight:6}}/>{p.name}</td>
+                      <td className="inv-cell negative">{fmt(avail)}</td>
+                      <td className="inv-cell negative">{fmt(Math.abs(avail))} needed</td>
+                      <td className="inv-cell">{fmt(getProductTotalSold(p.id))}</td>
+                      <td style={{fontSize:11,color:'var(--text-secondary)'}}>{orders.length} order{orders.length!==1?'s':''}</td>
+                    </tr>
+                    {isExpanded && (
+                      <tr><td colSpan="5" style={{padding:'4px 12px 12px'}}>
+                        <div className="sub-table">
+                          <table><thead><tr><th>Customer</th><th>Order Date</th><th style={{textAlign:'right'}}>Qty Ordered</th><th>Status</th></tr></thead>
+                          <tbody>{orders.map(o=>{const st=getStatus(o.status);return(
+                            <tr key={o.id}><td>{o.customer}</td><td>{fmtDate(o.date)}</td><td className="inv-cell">{fmt(o.products[p.id])}</td>
+                            <td><span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span></td></tr>
+                          );})}</tbody></table>
+                        </div>
+                      </td></tr>
+                    )}
+                  </React.Fragment>;
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* ── DRILL-DOWN: Products Available ── */}
+      {drillDown==='available' && (
+        <div className="drill-panel">
+          <div className="drill-header"><h3>Products Available — In Stock</h3><button className="btn-icon" onClick={()=>setDrillDown(null)}><Icon name="x"/></button></div>
+          <table>
+            <thead><tr><th>Product</th><th style={{textAlign:'right'}}>Starting</th><th style={{textAlign:'right'}}>Added</th><th style={{textAlign:'right'}}>Sold</th><th style={{textAlign:'right'}}>Available</th></tr></thead>
+            <tbody>
+              {productsAvail.sort((a,b)=>getProductAvailable(b.id)-getProductAvailable(a.id)).map(p=>{
+                const inv=data.inventory[p.id]||{starting:0,additions:[]};
+                const added=inv.additions.reduce((s,a)=>s+a.qty,0);
+                return <tr key={p.id}><td style={{fontWeight:500}}>{p.name}</td><td className="inv-cell">{fmt(inv.starting)}</td><td className="inv-cell positive">{added>0?'+'+fmt(added):'—'}</td><td className="inv-cell">{fmt(getProductTotalSold(p.id))}</td><td className="inv-cell positive" style={{fontWeight:700}}>{fmt(getProductAvailable(p.id))}</td></tr>;
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── DRILL-DOWN: Orders Ready ── */}
+      {drillDown==='ready' && (
+        <div className="drill-panel">
+          <div className="drill-header"><h3>Orders to Deliver — {activeYear}</h3><button className="btn-icon" onClick={()=>setDrillDown(null)}><Icon name="x"/></button></div>
+          <table>
+            <thead><tr><th>Customer</th><th>Date</th><th>Products</th><th>Status</th></tr></thead>
+            <tbody>{ordersReady.sort((a,b)=>new Date(a.date||0)-new Date(b.date||0)).map(o=>{const st=getStatus(o.status);const pc=Object.keys(o.products).filter(k=>o.products[k]>0).length;return(
+              <tr key={o.id}><td style={{fontWeight:500}}>{o.customer}</td><td>{fmtDate(o.date)}</td><td><span className="tag">{pc} product{pc!==1?'s':''}</span></td><td><span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span></td></tr>
+            );})}</tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── DRILL-DOWN: Delivered ── */}
+      {drillDown==='delivered' && (
+        <div className="drill-panel">
+          <div className="drill-header"><h3>Orders Delivered — {activeYear}</h3><button className="btn-icon" onClick={()=>setDrillDown(null)}><Icon name="x"/></button></div>
+          {ordersDelivered.length===0?<p style={{color:'var(--text-secondary)',fontSize:13}}>No deliveries yet for {activeYear}.</p>:(
+            <table><thead><tr><th>Customer</th><th>Date</th><th>Products</th></tr></thead>
+            <tbody>{ordersDelivered.map(o=>{const pc=Object.keys(o.products).filter(k=>o.products[k]>0).length;return(
+              <tr key={o.id}><td style={{fontWeight:500}}>{o.customer}</td><td>{fmtDate(o.date)}</td><td><span className="tag">{pc} product{pc!==1?'s':''}</span></td></tr>
+            );})}</tbody></table>
+          )}
+        </div>
+      )}
+
+      {/* ── DRILL-DOWN: Total Orders ── */}
+      {drillDown==='total' && (
+        <div className="drill-panel">
+          <div className="drill-header"><h3>All Orders — {activeYear}</h3><button className="btn-icon" onClick={()=>setDrillDown(null)}><Icon name="x"/></button></div>
+          <table><thead><tr><th>Customer</th><th>Date</th><th>Products</th><th>Status</th><th>Invoiced</th></tr></thead>
+          <tbody>{yearOrders.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0)).map(o=>{const st=getStatus(o.status);const pc=Object.keys(o.products).filter(k=>o.products[k]>0).length;return(
+            <tr key={o.id}><td style={{fontWeight:500}}>{o.customer}</td><td>{fmtDate(o.date)}</td><td><span className="tag">{pc} product{pc!==1?'s':''}</span></td><td><span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span></td><td>{o.invoiced?'Yes':'No'}</td></tr>
+          );})}</tbody></table>
+        </div>
+      )}
+
+      {/* Status summary + groups card */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
+        <div className="card">
+          <div className="card-header"><h3>Order Status Breakdown</h3></div>
+          {STATUS_OPTIONS.map(s=>{const c=yearOrders.filter(o=>o.status===s.value).length;return(
+            <div key={s.value} style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
+              <span className={`status-dot ${s.dot}`}></span><span style={{flex:1,fontSize:13}}>{s.label}</span><span style={{fontWeight:700,fontSize:16}}>{c}</span>
+            </div>
+          );})}
+        </div>
+        <div className="card">
+          <div className="card-header"><h3>Customer Groups</h3></div>
+          {data.customerGroups.map((g,i)=>(
+            <div key={i} style={{marginBottom:10}}><div style={{fontWeight:600,fontSize:13,color:'var(--primary)'}}>{g.name}</div><div style={{fontSize:12,color:'var(--text-secondary)'}}>{g.members.join(', ')}</div></div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════
+// ── INVENTORY SCREEN ──
+// ══════════════════════════
+function InventoryScreen() {
+  const {data,activeProducts,updateInventory,addInventory,getProductTotalSold,getProductAvailable,getProductSoldNotDelivered,getProductDelivered,showToast} = useApp();
+  const [addModal,setAddModal] = useState(null);
+  const [addDate,setAddDate] = useState(today());
+  const [addQty,setAddQty] = useState('');
+  const [addNote,setAddNote] = useState('');
+  const [editModal,setEditModal] = useState(null);
+  const [editVal,setEditVal] = useState('');
+
+  const handleAdd=()=>{if(!addQty||isNaN(addQty))return;addInventory(addModal,{date:addDate,qty:parseFloat(addQty),note:addNote});setAddModal(null);setAddQty('');setAddNote('');showToast('Inventory added');};
+
+  return (
+    <div className="fade-in">
+      <div className="page-header"><h2>Inventory Management</h2><p>Track starting, added, and available inventory by product</p></div>
+      <div className="card"><div className="inv-table-wrap"><table>
+        <thead><tr><th>Product</th><th style={{textAlign:'right'}}>Starting</th><th style={{textAlign:'right'}}>Added</th><th style={{textAlign:'right'}}>Total Sold</th><th style={{textAlign:'right'}}>Delivered</th><th style={{textAlign:'right'}}>Sold, Not Delivered</th><th style={{textAlign:'right'}}>Available</th><th></th></tr></thead>
+        <tbody>{activeProducts.map(p=>{
+          const inv=data.inventory[p.id]||{starting:0,additions:[]};const added=inv.additions.reduce((s,a)=>s+a.qty,0);const sold=getProductTotalSold(p.id);const delivered=getProductDelivered(p.id);const snd=getProductSoldNotDelivered(p.id);const avail=getProductAvailable(p.id);
+          return <tr key={p.id}>
+            <td style={{fontWeight:500}}>{p.name}</td>
+            <td className="inv-cell" style={{cursor:'pointer',textDecoration:'underline dotted'}} onClick={()=>{setEditModal(p.id);setEditVal(inv.starting);}}>{fmt(inv.starting)}</td>
+            <td className="inv-cell positive">{added>0?'+'+fmt(added):'—'}{inv.additions.length>0&&<div style={{fontSize:10,color:'#94a3b8'}}>{inv.additions.length} addition{inv.additions.length>1?'s':''}</div>}</td>
+            <td className="inv-cell">{fmt(sold)}</td>
+            <td className="inv-cell" style={{color:'var(--success)'}}>{fmt(delivered)}</td>
+            <td className="inv-cell" style={{color:snd>0?'var(--warning)':'inherit',fontWeight:snd>0?600:400}}>{fmt(Math.max(0,snd))}</td>
+            <td className={`inv-cell ${avail<0?'negative':'positive'}`} style={{fontWeight:700}}>{fmt(avail)}</td>
+            <td><button className="btn btn-sm btn-secondary" onClick={()=>setAddModal(p.id)}><Icon name="plus" size={14}/>Add</button></td>
+          </tr>;
+        })}</tbody>
+      </table></div></div>
+      {addModal&&<Modal title={`Add Inventory — ${ALL_PRODUCTS.find(p=>p.id===addModal)?.name}`} onClose={()=>setAddModal(null)}>
+        <div className="modal-body">
+          <div className="form-group"><label>Date</label><input type="date" value={addDate} onChange={e=>setAddDate(e.target.value)}/></div>
+          <div className="form-group"><label>Quantity</label><input type="number" step="0.1" placeholder="Enter quantity" value={addQty} onChange={e=>setAddQty(e.target.value)}/></div>
+          <div className="form-group"><label>Note (optional)</label><input placeholder="e.g., Restock from supplier" value={addNote} onChange={e=>setAddNote(e.target.value)}/></div>
+          {(data.inventory[addModal]?.additions||[]).length>0&&<div style={{marginTop:16}}><h4 style={{fontSize:13,fontWeight:600,marginBottom:8}}>Addition History</h4><table><thead><tr><th>Date</th><th>Qty</th><th>Note</th></tr></thead><tbody>{(data.inventory[addModal]?.additions||[]).map((a,i)=><tr key={i}><td>{fmtDate(a.date)}</td><td>{fmt(a.qty)}</td><td>{a.note||'—'}</td></tr>)}</tbody></table></div>}
+        </div>
+        <div className="modal-footer"><button className="btn btn-secondary" onClick={()=>setAddModal(null)}>Cancel</button><button className="btn btn-primary" onClick={handleAdd}>Add Inventory</button></div>
+      </Modal>}
+      {editModal&&<Modal title={`Edit Starting Inventory — ${ALL_PRODUCTS.find(p=>p.id===editModal)?.name}`} onClose={()=>setEditModal(null)}>
+        <div className="modal-body"><div className="form-group"><label>Starting Inventory</label><input type="number" step="0.1" value={editVal} onChange={e=>setEditVal(e.target.value)}/></div></div>
+        <div className="modal-footer"><button className="btn btn-secondary" onClick={()=>setEditModal(null)}>Cancel</button><button className="btn btn-primary" onClick={()=>{updateInventory(editModal,'starting',parseFloat(editVal)||0);setEditModal(null);showToast('Updated');}}>Save</button></div>
+      </Modal>}
+    </div>
+  );
+}
+
+// ══════════════════════
+// ── ORDERS SCREEN ──
+// ══════════════════════
+function OrdersScreen({onNavigate}) {
+  const {data,yearOrders,activeYear,setActiveYear,visibleYears,archivedYears,fyStart,deleteOrder} = useApp();
+  const [showAdd,setShowAdd] = useState(false);
+  const [filter,setFilter] = useState('all');
+  const [search,setSearch] = useState('');
+  const [editOrder,setEditOrder] = useState(null);
+  const [showArchived,setShowArchived] = useState(false);
+
+  const allYears = showArchived ? [...visibleYears,...archivedYears].sort().reverse() : visibleYears;
+
+  const filtered = useMemo(()=>{
+    let orders=[...yearOrders];
+    if(filter!=='all')orders=orders.filter(o=>o.status===filter);
+    if(search)orders=orders.filter(o=>o.customer.toLowerCase().includes(search.toLowerCase()));
+    return orders.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
+  },[yearOrders,filter,search]);
+
+  return (
+    <div className="fade-in">
+      <div className="page-header" style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+        <div><h2>Orders</h2><p>{yearOrders.length} orders in {activeYear}</p></div>
+        <div style={{display:'flex',gap:8,alignItems:'center'}}>
+          <select value={activeYear} onChange={e=>setActiveYear(e.target.value)} style={{width:'auto',padding:'6px 10px',fontSize:13,fontWeight:600}}>
+            {allYears.map(y=><option key={y} value={y}>{y}{archivedYears.includes(y)?' (Archived)':''}</option>)}
+          </select>
+          <button className="btn btn-sm btn-secondary" onClick={()=>setShowArchived(!showArchived)}><Icon name="archive" size={14}/>{showArchived?'Hide':'Show'} Archived</button>
+          <button className="btn btn-primary" onClick={()=>setShowAdd(true)}><Icon name="plus" size={16}/>New Order</button>
+        </div>
+      </div>
+      <div className="card" style={{padding:'12px 16px',display:'flex',gap:12,alignItems:'center',flexWrap:'wrap'}}>
+        <div className="search-box" style={{flex:1,minWidth:200}}><Icon name="search"/><input placeholder="Search customers..." value={search} onChange={e=>setSearch(e.target.value)}/></div>
+        <div className="chip-select">
+          <span className={`chip ${filter==='all'?'selected':''}`} onClick={()=>setFilter('all')}>All</span>
+          {STATUS_OPTIONS.map(s=><span key={s.value} className={`chip ${filter===s.value?'selected':''}`} onClick={()=>setFilter(s.value)}>{s.label}</span>)}
+        </div>
+      </div>
+      <div className="card" style={{padding:0}}><div className="inv-table-wrap"><table>
+        <thead><tr><th>Customer</th><th>Order Date</th><th>Products</th><th>Status</th><th>Invoiced</th><th></th></tr></thead>
+        <tbody>{filtered.length===0?<tr><td colSpan="6" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No orders found</td></tr>:filtered.map(o=>{
+          const st=getStatus(o.status);const pc=Object.keys(o.products).filter(k=>o.products[k]>0).length;
+          return <tr key={o.id} style={{cursor:'pointer'}} onClick={()=>setEditOrder(o)}>
+            <td style={{fontWeight:500}}>{o.customer}</td><td>{fmtDate(o.date)}</td><td><span className="tag">{pc} product{pc!==1?'s':''}</span></td>
+            <td><span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span></td>
+            <td>{o.invoiced?<span style={{color:'var(--success)'}}>Yes</span>:'No'}</td>
+            <td style={{textAlign:'right'}}><button className="btn-icon" style={{marginRight:4}} onClick={e=>{e.stopPropagation();setEditOrder(o);}}><Icon name="edit" size={14}/></button><button className="btn-icon" onClick={e=>{e.stopPropagation();if(confirm('Delete?'))deleteOrder(o.id);}}><Icon name="trash" size={14}/></button></td>
+          </tr>;
+        })}</tbody>
+      </table></div></div>
+      {(showAdd||editOrder)&&<OrderModal order={editOrder} onClose={()=>{setShowAdd(false);setEditOrder(null);}}/>}
+    </div>
+  );
+}
+
+function OrderModal({order,onClose}) {
+  const {addOrder,updateOrder,showToast} = useApp();
+  const [customer,setCustomer] = useState(order?.customer||'');
+  const [date,setDate] = useState(order?.date||today());
+  const [status,setStatus] = useState(order?.status||'pending');
+  const [invoiced,setInvoiced] = useState(order?.invoiced||false);
+  const [products,setProducts] = useState(order?.products||{});
+  const [custSearch,setCustSearch] = useState('');
+  const filteredCust=ALL_CUSTOMERS.filter(c=>c.toLowerCase().includes(custSearch.toLowerCase()));
+  const setProduct=(pid,val)=>{const v=parseFloat(val)||0;setProducts(p=>v>0?{...p,[pid]:v}:Object.fromEntries(Object.entries(p).filter(([k])=>k!==pid)));};
+  const save=()=>{if(!customer){alert('Select a customer');return;}if(Object.keys(products).length===0){alert('Add at least one product');return;}if(order){updateOrder(order.id,{customer,date,status,invoiced,products});showToast('Order updated');}else addOrder({customer,date,status,invoiced,products});onClose();};
+  return <Modal title={order?'Edit Order':'New Order'} onClose={onClose} wide>
+    <div className="modal-body">
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+        <div className="form-group"><label>Customer</label>{order?<input value={customer} readOnly style={{background:'#f8fafc'}}/>:<div><input placeholder="Search customer..." value={custSearch} onChange={e=>{setCustSearch(e.target.value);if(!customer)setCustomer('');}}/>
+          {custSearch&&!customer&&<div style={{border:'1px solid var(--border)',borderRadius:6,maxHeight:150,overflowY:'auto',marginTop:4}}>{filteredCust.slice(0,10).map(c=><div key={c} style={{padding:'6px 12px',cursor:'pointer',fontSize:13}} onClick={()=>{setCustomer(c);setCustSearch(c);}} onMouseEnter={e=>e.target.style.background='#f1f5f9'} onMouseLeave={e=>e.target.style.background=''}>{c}</div>)}</div>}
+        </div>}</div>
+        <div className="form-group"><label>Order Date</label><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></div>
+        <div className="form-group"><label>Status</label><select value={status} onChange={e=>setStatus(e.target.value)}>{STATUS_OPTIONS.map(s=><option key={s.value} value={s.value}>{s.label}</option>)}</select></div>
+        <div className="form-group" style={{display:'flex',alignItems:'flex-end',paddingBottom:8}}><label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer'}}><input type="checkbox" checked={invoiced} onChange={e=>setInvoiced(e.target.checked)} style={{width:'auto'}}/>Invoiced</label></div>
+      </div>
+      <h4 style={{fontSize:14,fontWeight:600,margin:'16px 0 8px'}}>Products & Quantities</h4>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:8}}>
+        {ALL_PRODUCTS.map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontSize:12,flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.name}</span><input type="number" step="0.1" style={{width:80}} placeholder="0" value={products[p.id]||''} onChange={e=>setProduct(p.id,e.target.value)}/></div>)}
+      </div>
+    </div>
+    <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={save}>{order?'Save Changes':'Create Order'}</button></div>
+  </Modal>;
+}
+
+// ══════════════════════════
+// ── CUSTOMERS SCREEN ──
+// ══════════════════════════
+function CustomersScreen({onNavigate}) {
+  const {data,activeCustomers} = useApp();
+  const [search,setSearch] = useState('');
+  const customerData=useMemo(()=>activeCustomers.map(name=>{
+    const orders=data.orders.filter(o=>o.customer===name);const tp={};orders.forEach(o=>{Object.entries(o.products).forEach(([pid,qty])=>{tp[pid]=(tp[pid]||0)+qty;});});
+    const group=data.customerGroups.find(g=>g.members.includes(name));return{name,orders,totalProducts:tp,group:group?.name||null};
+  }).filter(c=>c.name.toLowerCase().includes(search.toLowerCase())),[activeCustomers,data,search]);
+
+  const groupData=useMemo(()=>data.customerGroups.map(g=>{
+    const members=customerData.filter(c=>g.members.includes(c.name));const tp={};members.forEach(m=>{Object.entries(m.totalProducts).forEach(([pid,qty])=>{tp[pid]=(tp[pid]||0)+qty;});});
+    return{...g,members,totalProducts:tp};
+  }),[data.customerGroups,customerData]);
+
+  return <div className="fade-in">
+    <div className="page-header"><h2>Customers</h2><p>View customer orders and group totals</p></div>
+    <div className="card" style={{padding:'12px 16px'}}><div className="search-box"><Icon name="search"/><input placeholder="Search customers..." value={search} onChange={e=>setSearch(e.target.value)}/></div></div>
+    {groupData.map(g=><div key={g.name} className="card"><div className="card-header"><h3 style={{color:'var(--primary)'}}>{g.name} Group</h3><span className="tag">{g.members.length} members</span></div>
+      <table><thead><tr><th>Customer</th><th>Orders</th><th>Latest Date</th><th>Status</th><th></th></tr></thead><tbody>
+        {g.members.map(m=>{const latest=m.orders.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0))[0];const st=latest?getStatus(latest.status):getStatus('pending');return <tr key={m.name} style={{cursor:'pointer'}} onClick={()=>onNavigate('customer-detail',m.name)}><td style={{fontWeight:500}}>{m.name}</td><td>{m.orders.length}</td><td>{latest?fmtDate(latest.date):'—'}</td><td><span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span></td><td style={{textAlign:'right'}}><Icon name="chevron" size={16}/></td></tr>;})}
+        <tr className="group-row"><td>{g.name} Total</td><td>{g.members.reduce((s,m)=>s+m.orders.length,0)}</td><td colSpan="3">{Object.entries(g.totalProducts).filter(([,v])=>v>0).slice(0,5).map(([pid,qty])=>{const p=ALL_PRODUCTS.find(x=>x.id===pid);return <span key={pid} className="tag" style={{marginRight:4}}>{p?.name}: {fmt(qty)}</span>;})}</td></tr>
+      </tbody></table>
+    </div>)}
+    <div className="card"><div className="card-header"><h3>All Customers</h3></div><table><thead><tr><th>Customer</th><th>Group</th><th>Orders</th><th>Latest</th><th>Status</th><th></th></tr></thead><tbody>
+      {customerData.map(c=>{const latest=c.orders.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0))[0];const st=latest?getStatus(latest.status):getStatus('pending');return <tr key={c.name} style={{cursor:'pointer'}} onClick={()=>onNavigate('customer-detail',c.name)}><td style={{fontWeight:500}}>{c.name}</td><td>{c.group?<span className="tag" style={{background:'var(--primary-bg)',color:'var(--primary)'}}>{c.group}</span>:'—'}</td><td>{c.orders.length}</td><td>{latest?fmtDate(latest.date):'—'}</td><td><span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span></td><td style={{textAlign:'right'}}><Icon name="chevron" size={16}/></td></tr>;})}
+    </tbody></table></div>
+  </div>;
+}
+
+function CustomerDetail({customerName,onBack}) {
+  const {data,updateOrder} = useApp();
+  const orders=data.orders.filter(o=>o.customer===customerName);const group=data.customerGroups.find(g=>g.members.includes(customerName));const deliveries=data.deliveries.filter(d=>d.customer===customerName);
+  const tp={};orders.forEach(o=>{Object.entries(o.products).forEach(([pid,qty])=>{tp[pid]=(tp[pid]||0)+qty;});});
+  const usedProducts=ALL_PRODUCTS.filter(p=>tp[p.id]>0);
+  return <div className="fade-in">
+    <div className="page-header" style={{display:'flex',alignItems:'center',gap:12}}><button className="btn-icon" onClick={onBack}><Icon name="back"/></button><div><h2>{customerName}</h2><p>{group?<span className="tag" style={{background:'var(--primary-bg)',color:'var(--primary)'}}>{group.name} Group</span>:null} {orders.length} order{orders.length!==1?'s':''}</p></div></div>
+    <div className="card"><div className="card-header"><h3>Orders</h3></div><div className="inv-table-wrap"><table>
+      <thead><tr><th>Date</th><th>Status</th>{usedProducts.map(p=><th key={p.id} className="product-col" style={{textAlign:'right',fontSize:10}}>{p.name}</th>)}</tr></thead>
+      <tbody>{orders.map(o=><tr key={o.id}><td>{fmtDate(o.date)}</td><td><select value={o.status} onChange={e=>updateOrder(o.id,{status:e.target.value})} style={{width:'auto',padding:'3px 6px',fontSize:11}}>{STATUS_OPTIONS.map(s=><option key={s.value} value={s.value}>{s.label}</option>)}</select></td>{usedProducts.map(p=><td key={p.id} className="inv-cell">{o.products[p.id]?fmt(o.products[p.id]):'—'}</td>)}</tr>)}
+        <tr style={{fontWeight:700,background:'#f0f9ff'}}><td colSpan="2">Customer Total</td>{usedProducts.map(p=><td key={p.id} className="inv-cell" style={{fontWeight:700}}>{tp[p.id]?fmt(tp[p.id]):'—'}</td>)}</tr>
+      </tbody>
+    </table></div></div>
+    {deliveries.length>0&&<div className="card"><div className="card-header"><h3>Delivery History</h3></div><table><thead><tr><th>Date</th><th>Products</th><th>Pumps Out</th><th>Totes</th><th>Attachments</th></tr></thead><tbody>
+      {deliveries.map(d=><tr key={d.id}><td>{fmtDate(d.date)}</td><td>{Object.entries(d.products||{}).filter(([,v])=>v>0).map(([pid,qty])=>{const p=ALL_PRODUCTS.find(x=>x.id===pid);return <span key={pid} className="tag" style={{marginRight:4}}>{p?.name}: {fmt(qty)}</span>;})}</td><td>{d.pumpsOut||'—'}{d.pumpsReturnDate?` (return: ${fmtDate(d.pumpsReturnDate)})`:''}</td><td>{d.totes||'—'}{d.totesReturned?' (returned)':d.totes?' (out)':''}</td><td>{(d.attachments||[]).length>0?<span className="tag">{d.attachments.length} file{d.attachments.length>1?'s':''}</span>:'—'}</td></tr>)}
+    </tbody></table></div>}
+  </div>;
+}
+
+// ══════════════════════════
+// ── DELIVERIES SCREEN ──
+// ══════════════════════════
+function DeliveriesScreen({onNavigate}) {
+  const {data,updateDelivery,showToast} = useApp();
+  const [showNew,setShowNew] = useState(false);
+  const [showTicket,setShowTicket] = useState(null);
+  const [tab,setTab] = useState('deliveries');
+  const activePumps=data.deliveries.filter(d=>d.pumpsOut>0&&!d.pumpsReturned);
+  const activeTotes=data.deliveries.filter(d=>d.totes>0&&!d.totesReturned);
+
+  return <div className="fade-in">
+    <div className="page-header" style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+      <div><h2>Deliveries</h2><p>Manage deliveries, pumps, and totes</p></div>
+      <button className="btn btn-primary" onClick={()=>setShowNew(true)}><Icon name="truck" size={16}/>New Delivery</button>
+    </div>
+    <div className="tabs">
+      <div className={`tab ${tab==='deliveries'?'active':''}`} onClick={()=>setTab('deliveries')}>Deliveries ({data.deliveries.length})</div>
+      <div className={`tab ${tab==='pumps'?'active':''}`} onClick={()=>setTab('pumps')}>Pumps Out ({activePumps.length})</div>
+      <div className={`tab ${tab==='totes'?'active':''}`} onClick={()=>setTab('totes')}>Totes Out ({activeTotes.length})</div>
+      <div className={`tab ${tab==='tickets'?'active':''}`} onClick={()=>setTab('tickets')}>Saved Tickets ({data.deliveryTickets?.length||0})</div>
+    </div>
+    {tab==='deliveries'&&<div className="card" style={{padding:0}}><table><thead><tr><th>Customer</th><th>Date</th><th>Products</th><th>Pumps</th><th>Totes</th><th>Photos</th><th></th></tr></thead><tbody>
+      {data.deliveries.length===0?<tr><td colSpan="7" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No deliveries recorded yet</td></tr>:data.deliveries.sort((a,b)=>new Date(b.date)-new Date(a.date)).map(d=><tr key={d.id}>
+        <td style={{fontWeight:500}}>{d.customer}</td><td>{fmtDate(d.date)}</td>
+        <td>{Object.entries(d.products||{}).filter(([,v])=>v>0).slice(0,3).map(([pid,qty])=>{const p=ALL_PRODUCTS.find(x=>x.id===pid);return <span key={pid} className="tag" style={{marginRight:4}}>{p?.name?.split('-')[0]?.trim()}: {fmt(qty)}</span>;})}</td>
+        <td>{d.pumpsOut||'—'}</td><td>{d.totes||'—'}{d.totesReturned?' (in)':''}</td>
+        <td>{(d.attachments||[]).length>0?<span className="tag">{d.attachments.length}</span>:'—'}</td>
+        <td><button className="btn btn-sm btn-secondary" onClick={()=>setShowTicket(d)}><Icon name="printer" size={14}/>Ticket</button></td>
+      </tr>)}
+    </tbody></table></div>}
+    {tab==='pumps'&&<div className="card" style={{padding:0}}><table><thead><tr><th>Customer</th><th>Delivery Date</th><th>Pumps Out</th><th>Return Date</th><th></th></tr></thead><tbody>
+      {activePumps.length===0?<tr><td colSpan="5" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No pumps currently out</td></tr>:activePumps.map(d=><tr key={d.id}><td style={{fontWeight:500}}>{d.customer}</td><td>{fmtDate(d.date)}</td><td style={{fontWeight:600}}>{d.pumpsOut}</td><td>{d.pumpsReturnDate?fmtDate(d.pumpsReturnDate):'Not set'}</td>
+        <td><button className="btn btn-sm btn-success" onClick={()=>{updateDelivery(d.id,{pumpsReturned:true,pumpsReturnedDate:today()});showToast('Pumps returned');}}><Icon name="check" size={14}/>Return</button></td></tr>)}
+    </tbody></table></div>}
+    {tab==='totes'&&<div className="card" style={{padding:0}}><table><thead><tr><th>Customer</th><th>Delivery Date</th><th>Totes</th><th>Status</th><th></th></tr></thead><tbody>
+      {activeTotes.length===0?<tr><td colSpan="5" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No totes currently out</td></tr>:activeTotes.map(d=><tr key={d.id}><td style={{fontWeight:500}}>{d.customer}</td><td>{fmtDate(d.date)}</td><td style={{fontWeight:600}}>{d.totes}</td><td><span className="status-badge status-partial-deliver"><span className="status-dot dot-partial-deliver"></span>Out</span></td>
+        <td><button className="btn btn-sm btn-success" onClick={()=>{updateDelivery(d.id,{totesReturned:true,totesReturnedDate:today()});showToast('Totes checked in');}}><Icon name="check" size={14}/>Check In</button></td></tr>)}
+    </tbody></table></div>}
+    {tab==='tickets'&&<div className="card" style={{padding:0}}><table><thead><tr><th>Customer</th><th>Delivery Date</th><th>Saved On</th><th>Products</th><th></th></tr></thead><tbody>
+      {(data.deliveryTickets||[]).length===0?<tr><td colSpan="5" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No saved tickets yet. Tickets are saved when you generate a delivery.</td></tr>:data.deliveryTickets.map(t=><tr key={t.id}><td style={{fontWeight:500}}>{t.customer}</td><td>{fmtDate(t.date)}</td><td>{fmtDate(t.savedAt)}</td><td>{t.productCount} products</td>
+        <td><button className="btn btn-sm btn-secondary" onClick={()=>setShowTicket(t)}><Icon name="printer" size={14}/>View</button></td></tr>)}
+    </tbody></table></div>}
+    {showNew&&<NewDeliveryModal onClose={()=>setShowNew(false)}/>}
+    {showTicket&&<DeliveryTicketModal delivery={showTicket} onClose={()=>setShowTicket(null)}/>}
+  </div>;
+}
+
+// ══════════════════════════════════════
+// ── NEW DELIVERY WITH PHOTO CAPTURE ──
+// ══════════════════════════════════════
+function NewDeliveryModal({onClose}) {
+  const {data,addDelivery,updateOrder,showToast,saveDeliveryTicket} = useApp();
+  const [mode,setMode] = useState('individual');
+  const [selectedOrder,setSelectedOrder] = useState('');
+  const [selectedGroup,setSelectedGroup] = useState('');
+  const [selectedGroupOrders,setSelectedGroupOrders] = useState([]);
+  const [date,setDate] = useState(today());
+  const [products,setProducts] = useState({});
+  const [pumpsOut,setPumpsOut] = useState('');
+  const [pumpsReturnDate,setPumpsReturnDate] = useState('');
+  const [totes,setTotes] = useState('');
+  const [markDelivered,setMarkDelivered] = useState(true);
+  const [attachments,setAttachments] = useState([]);
+  const [showCamera,setShowCamera] = useState(false);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const mediaRecorderRef = useRef(null);
+  const [recording,setRecording] = useState(false);
+  const [cameraMode,setCameraMode] = useState('photo');
+  const fileInputRef = useRef(null);
+
+  const pendingOrders=data.orders.filter(o=>o.status!=='paid');
+  const selectedOrderObj=data.orders.find(o=>o.id===selectedOrder);
+  const groupsWithPendingOrders=useMemo(()=>data.customerGroups.filter(g=>pendingOrders.some(o=>g.members.includes(o.customer))),[data.customerGroups,pendingOrders]);
+  const selectedGroupObj=data.customerGroups.find(g=>g.name===selectedGroup);
+  const groupPendingOrders=useMemo(()=>selectedGroupObj?pendingOrders.filter(o=>selectedGroupObj.members.includes(o.customer)):[], [selectedGroupObj,pendingOrders]);
+
+  useEffect(()=>{if(mode==='individual'&&selectedOrderObj)setProducts({...selectedOrderObj.products});},[selectedOrder,mode]);
+  useEffect(()=>{
+    if(mode==='group'&&selectedGroupObj){
+      const ids=groupPendingOrders.map(o=>o.id);setSelectedGroupOrders(ids);
+      const combined={};groupPendingOrders.forEach(o=>{Object.entries(o.products).forEach(([pid,qty])=>{combined[pid]=(combined[pid]||0)+qty;});});setProducts(combined);
+    }
+  },[selectedGroup,mode]);
+
+  const toggleGroupOrder=orderId=>{
+    setSelectedGroupOrders(prev=>{
+      const next=prev.includes(orderId)?prev.filter(id=>id!==orderId):[...prev,orderId];
+      const combined={};groupPendingOrders.filter(o=>next.includes(o.id)).forEach(o=>{Object.entries(o.products).forEach(([pid,qty])=>{combined[pid]=(combined[pid]||0)+qty;});});setProducts(combined);return next;
+    });
+  };
+
+  // Camera functions
+  const startCamera=async()=>{
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:cameraMode==='video'});
+      streamRef.current=stream;if(videoRef.current)videoRef.current.srcObject=stream;setShowCamera(true);
+    }catch(e){showToast('Camera access denied');setShowCamera(false);}
+  };
+  const stopCamera=()=>{if(streamRef.current){streamRef.current.getTracks().forEach(t=>t.stop());streamRef.current=null;}setShowCamera(false);setRecording(false);};
+  const capturePhoto=()=>{
+    const video=videoRef.current;if(!video)return;
+    const canvas=document.createElement('canvas');
+    const scale=Math.min(1,1200/video.videoWidth);
+    canvas.width=video.videoWidth*scale;canvas.height=video.videoHeight*scale;
+    canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
+    const dataUrl=canvas.toDataURL('image/jpeg',0.8);
+    setAttachments(prev=>[...prev,{type:'photo',data:dataUrl,timestamp:new Date().toISOString()}]);
+    showToast('Photo captured');
+  };
+  const startRecording=()=>{
+    const stream=streamRef.current;if(!stream)return;
+    const chunks=[];const mr=new MediaRecorder(stream,{mimeType:'video/webm'});
+    mr.ondataavailable=e=>{if(e.data.size>0)chunks.push(e.data);};
+    mr.onstop=()=>{const blob=new Blob(chunks,{type:'video/webm'});const reader=new FileReader();reader.onload=()=>{setAttachments(prev=>[...prev,{type:'video',data:reader.result,timestamp:new Date().toISOString()}]);showToast('Video saved');};reader.readAsDataURL(blob);};
+    mr.start();mediaRecorderRef.current=mr;setRecording(true);
+    setTimeout(()=>{if(mediaRecorderRef.current?.state==='recording'){mediaRecorderRef.current.stop();setRecording(false);}},30000);
+  };
+  const stopRecording=()=>{if(mediaRecorderRef.current?.state==='recording'){mediaRecorderRef.current.stop();setRecording(false);}};
+  const handleFileUpload=e=>{
+    Array.from(e.target.files).forEach(file=>{const reader=new FileReader();reader.onload=ev=>{
+      const type=file.type.startsWith('video')?'video':'photo';
+      if(type==='photo'){const img=new Image();img.onload=()=>{const canvas=document.createElement('canvas');const scale=Math.min(1,1200/img.width);canvas.width=img.width*scale;canvas.height=img.height*scale;canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);setAttachments(prev=>[...prev,{type:'photo',data:canvas.toDataURL('image/jpeg',0.8),timestamp:new Date().toISOString()}]);};img.src=ev.target.result;}
+      else setAttachments(prev=>[...prev,{type:'video',data:ev.target.result,timestamp:new Date().toISOString()}]);
+    };reader.readAsDataURL(file);});
+  };
+  const removeAttachment=i=>setAttachments(prev=>prev.filter((_,j)=>j!==i));
+
+  useEffect(()=>()=>stopCamera(),[]);
+
+  const hasSelection=mode==='individual'?!!selectedOrderObj:selectedGroupOrders.length>0;
+
+  const save=()=>{
+    if(mode==='individual'){
+      if(!selectedOrderObj){alert('Select an order');return;}
+      addDelivery({customer:selectedOrderObj.customer,orderId:selectedOrderObj.id,date,products,pumpsOut:parseInt(pumpsOut)||0,pumpsReturnDate,pumpsReturned:false,totes:parseInt(totes)||0,totesReturned:false,attachments});
+      saveDeliveryTicket({customer:selectedOrderObj.customer,date,products:{...products},pumpsOut:parseInt(pumpsOut)||0,totes:parseInt(totes)||0,productCount:Object.keys(products).filter(k=>products[k]>0).length,attachments});
+      if(markDelivered)updateOrder(selectedOrderObj.id,{status:'paid'});
+    } else {
+      if(selectedGroupOrders.length===0){alert('Select at least one order');return;}
+      const ordersToDeliver=groupPendingOrders.filter(o=>selectedGroupOrders.includes(o.id));
+      ordersToDeliver.forEach(o=>{
+        addDelivery({customer:o.customer,orderId:o.id,groupName:selectedGroup,date,products:{...o.products},pumpsOut:0,pumpsReturnDate:'',pumpsReturned:false,totes:0,totesReturned:false,attachments:[]});
+        if(markDelivered)updateOrder(o.id,{status:'paid'});
+      });
+      saveDeliveryTicket({customer:selectedGroup+' (Group)',date,products:{...products},pumpsOut:parseInt(pumpsOut)||0,totes:parseInt(totes)||0,productCount:Object.keys(products).filter(k=>products[k]>0).length,attachments});
+      if((parseInt(pumpsOut)||0)>0||(parseInt(totes)||0)>0){addDelivery({customer:selectedGroup+' (Group)',orderId:'group_'+selectedGroup,groupName:selectedGroup,date,products:{},pumpsOut:parseInt(pumpsOut)||0,pumpsReturnDate,pumpsReturned:false,totes:parseInt(totes)||0,totesReturned:false,attachments});}
+      showToast(`${ordersToDeliver.length} deliveries recorded for ${selectedGroup}`);
+    }
+    onClose();
+  };
+
+  return <Modal title="New Delivery" onClose={()=>{stopCamera();onClose();}} wide>
+    <div className="modal-body">
+      <div style={{display:'flex',gap:0,marginBottom:16,border:'1px solid var(--border)',borderRadius:6,overflow:'hidden',width:'fit-content'}}>
+        <button onClick={()=>{setMode('individual');setSelectedGroup('');setSelectedGroupOrders([]);setProducts({});}} style={{padding:'8px 20px',fontSize:13,fontWeight:500,cursor:'pointer',border:'none',background:mode==='individual'?'var(--primary)':'#fff',color:mode==='individual'?'#fff':'var(--text)'}}>Individual Order</button>
+        <button onClick={()=>{setMode('group');setSelectedOrder('');setProducts({});}} style={{padding:'8px 20px',fontSize:13,fontWeight:500,cursor:'pointer',border:'none',borderLeft:'1px solid var(--border)',background:mode==='group'?'var(--primary)':'#fff',color:mode==='group'?'#fff':'var(--text)'}}>Group Delivery</button>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+        {mode==='individual'?<div className="form-group"><label>Select Order</label><select value={selectedOrder} onChange={e=>setSelectedOrder(e.target.value)}><option value="">-- Select an order --</option>{pendingOrders.map(o=><option key={o.id} value={o.id}>{o.customer} — {fmtDate(o.date)}</option>)}</select></div>
+        :<div className="form-group"><label>Select Group</label><select value={selectedGroup} onChange={e=>setSelectedGroup(e.target.value)}><option value="">-- Select a group --</option>{groupsWithPendingOrders.map(g=><option key={g.name} value={g.name}>{g.name} ({g.members.length} members)</option>)}</select></div>}
+        <div className="form-group"><label>Delivery Date</label><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></div>
+      </div>
+      {mode==='group'&&selectedGroupObj&&<div style={{marginTop:12}}><h4 style={{fontSize:14,fontWeight:600,marginBottom:8}}>Select Orders to Deliver</h4><div style={{border:'1px solid var(--border)',borderRadius:6,overflow:'hidden'}}>
+        {groupPendingOrders.length===0?<div style={{padding:16,textAlign:'center',color:'var(--text-secondary)',fontSize:13}}>No pending orders for this group</div>:groupPendingOrders.map(o=>{const st=getStatus(o.status);const pc=Object.keys(o.products).filter(k=>o.products[k]>0).length;return <label key={o.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid #f1f5f9',background:selectedGroupOrders.includes(o.id)?'var(--primary-bg)':''}}>
+          <input type="checkbox" checked={selectedGroupOrders.includes(o.id)} onChange={()=>toggleGroupOrder(o.id)} style={{width:'auto'}}/><span style={{fontWeight:500,flex:1}}>{o.customer}</span><span style={{fontSize:12,color:'var(--text-secondary)'}}>{fmtDate(o.date)}</span><span className="tag">{pc} product{pc!==1?'s':''}</span></label>;})}
+      </div></div>}
+      {hasSelection&&<>
+        <h4 style={{fontSize:14,fontWeight:600,margin:'16px 0 8px'}}>{mode==='group'?'Combined Products':'Products to Deliver'}</h4>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:8}}>
+          {Object.entries(products).filter(([,v])=>v>0).map(([pid,qty])=>{const p=ALL_PRODUCTS.find(x=>x.id===pid);return <div key={pid} style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontSize:12,flex:1}}>{p?.name}</span><input type="number" step="0.1" style={{width:80}} value={qty} onChange={e=>{const v=parseFloat(e.target.value)||0;setProducts(ps=>({...ps,[pid]:v}));}}/></div>;})}
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginTop:16}}>
+          <div className="form-group"><label>Pumps Out (qty)</label><input type="number" value={pumpsOut} onChange={e=>setPumpsOut(e.target.value)} placeholder="0"/></div>
+          <div className="form-group"><label>Pump Return Date</label><input type="date" value={pumpsReturnDate} onChange={e=>setPumpsReturnDate(e.target.value)}/></div>
+          <div className="form-group"><label>Totes (qty)</label><input type="number" value={totes} onChange={e=>setTotes(e.target.value)} placeholder="0"/></div>
+        </div>
+
+        {/* ── PHOTO / VIDEO CAPTURE ── */}
+        <div style={{marginTop:16,padding:16,background:'#f8fafc',borderRadius:8,border:'1px solid var(--border)'}}>
+          <h4 style={{fontSize:14,fontWeight:600,marginBottom:10}}>Photos & Video</h4>
+          <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+            <button className="btn btn-secondary" onClick={()=>{setCameraMode('photo');startCamera();}}><Icon name="camera" size={14}/>Take Photo</button>
+            <button className="btn btn-secondary" onClick={()=>{setCameraMode('video');startCamera();}}><Icon name="camera" size={14}/>Record Video</button>
+            <button className="btn btn-secondary" onClick={()=>fileInputRef.current?.click()}><Icon name="upload" size={14}/>Upload File</button>
+            <input ref={fileInputRef} type="file" accept="image/*,video/*" multiple style={{display:'none'}} onChange={handleFileUpload} capture="environment"/>
+          </div>
+          {showCamera&&<div style={{marginTop:12}}>
+            <video ref={videoRef} autoPlay playsInline muted className="camera-preview"/>
+            <div style={{display:'flex',gap:8,marginTop:8}}>
+              {cameraMode==='photo'?<button className="btn btn-primary" onClick={capturePhoto}><Icon name="camera" size={14}/>Capture</button>:
+                recording?<button className="btn btn-danger" onClick={stopRecording}>Stop Recording</button>:<button className="btn btn-danger" onClick={startRecording}>Start Recording (max 30s)</button>}
+              <button className="btn btn-secondary" onClick={stopCamera}>Close Camera</button>
+            </div>
+          </div>}
+          {attachments.length>0&&<div className="photo-grid">{attachments.map((a,i)=><div key={i} className="photo-thumb">
+            {a.type==='photo'?<img src={a.data}/>:<video src={a.data} controls/>}
+            <button className="photo-remove" onClick={()=>removeAttachment(i)}>x</button>
+          </div>)}</div>}
+        </div>
+
+        <label style={{display:'flex',alignItems:'center',gap:8,marginTop:12,cursor:'pointer',fontSize:13}}>
+          <input type="checkbox" checked={markDelivered} onChange={e=>setMarkDelivered(e.target.checked)} style={{width:'auto'}}/>
+          Mark {mode==='group'?'all selected orders':'order'} as "Paid & Delivered"
+        </label>
+      </>}
+    </div>
+    <div className="modal-footer"><button className="btn btn-secondary" onClick={()=>{stopCamera();onClose();}}>Cancel</button><button className="btn btn-success" onClick={save} disabled={!hasSelection}><Icon name="truck" size={14}/>Record Delivery</button></div>
+  </Modal>;
+}
+
+// ══════════════════════════
+// ── DELIVERY TICKET ──
+// ══════════════════════════
+function DeliveryTicketModal({delivery,onClose}) {
+  const ticketRef=useRef();
+  const handlePrint=()=>{
+    const content=ticketRef.current.innerHTML;
+    const win=window.open('','_blank','width=800,height=600');
+    win.document.write(`<!DOCTYPE html><html><head><title>Delivery Ticket - ${delivery.customer}</title><style>body{font-family:'Inter',Arial,sans-serif;padding:40px;color:#1e293b}h2{margin:0 0 4px;font-size:22px}h4{margin:0;font-size:13px;color:#64748b;font-weight:400}table{width:100%;border-collapse:collapse;margin:20px 0}th{text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:2px solid #e2e8f0;font-size:12px;font-weight:600;text-transform:uppercase}td{padding:8px 12px;border-bottom:1px solid #f1f5f9;font-size:14px}.sig{margin-top:60px;display:grid;grid-template-columns:1fr 1fr;gap:40px}.sig-line{border-top:1px solid #1e293b;padding-top:8px;font-size:12px;color:#64748b}.photos{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.photos img{max-width:200px;border-radius:4px}@media print{body{padding:20px}}</style></head><body>${content}</body></html>`);
+    win.document.close();win.print();
+  };
+  const productEntries=Object.entries(delivery.products||{}).filter(([,v])=>v>0);
+  const atts=delivery.attachments||[];
+  return <Modal title="Delivery Ticket" onClose={onClose} wide>
+    <div className="modal-body"><div ref={ticketRef}>
+      <div style={{textAlign:'center',marginBottom:24,paddingBottom:16,borderBottom:'2px solid #1e293b'}}><h2>Quantum Ag — Delivery Ticket</h2><h4>BWF Product Delivery</h4></div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:20}}>
+        <p style={{fontSize:14}}><strong>Customer:</strong> {delivery.customer}</p>
+        <p style={{fontSize:14}}><strong>Delivery Date:</strong> {fmtDate(delivery.date)}</p>
+        {delivery.pumpsOut>0&&<p style={{fontSize:14}}><strong>Pumps Out:</strong> {delivery.pumpsOut}{delivery.pumpsReturnDate?` (return by ${fmtDate(delivery.pumpsReturnDate)})`:''}</p>}
+        {delivery.totes>0&&<p style={{fontSize:14}}><strong>Totes:</strong> {delivery.totes}</p>}
+      </div>
+      {productEntries.length>0&&<table><thead><tr><th>Product</th><th style={{textAlign:'right'}}>Quantity</th></tr></thead><tbody>
+        {productEntries.map(([pid,qty])=>{const p=ALL_PRODUCTS.find(x=>x.id===pid);return <tr key={pid}><td>{p?.name||pid}</td><td style={{textAlign:'right',fontWeight:600}}>{fmt(qty)}</td></tr>;})}
+      </tbody></table>}
+      {atts.length>0&&<div><h4 style={{fontSize:13,fontWeight:600,margin:'16px 0 8px'}}>Attached Photos/Video</h4><div className="photos" style={{display:'flex',flexWrap:'wrap',gap:8}}>
+        {atts.filter(a=>a.type==='photo').map((a,i)=><img key={i} src={a.data} style={{maxWidth:200,borderRadius:4}}/>)}
+      </div></div>}
+      <div style={{marginTop:60,display:'grid',gridTemplateColumns:'1fr 1fr',gap:40}}>
+        <div><div style={{borderTop:'1px solid #1e293b',paddingTop:8,fontSize:12,color:'#64748b'}}>Driver Signature</div></div>
+        <div><div style={{borderTop:'1px solid #1e293b',paddingTop:8,fontSize:12,color:'#64748b'}}>Customer Signature</div></div>
+      </div>
+      <div style={{marginTop:40,paddingTop:16,borderTop:'1px solid #e2e8f0',fontSize:12,color:'#94a3b8',textAlign:'center'}}>Quantum Ag — Generated {new Date().toLocaleDateString()}</div>
+    </div></div>
+    <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Close</button><button className="btn btn-primary" onClick={handlePrint}><Icon name="printer" size={14}/>Print / Save PDF</button></div>
+  </Modal>;
+}
+
+// ══════════════════════════
+// ── SETTINGS SCREEN ──
+// ══════════════════════════
+function SettingsScreen() {
+  const {data,addGroup,updateGroup,deleteGroup,updateSettings,exportData,importData,showToast,setData,sbConnected,archivedYears,availableYears} = useApp();
+  const [showGroupModal,setShowGroupModal] = useState(false);
+  const [editGroup,setEditGroup] = useState(null);
+  const fileRef=useRef();
+  const fy=data.settings||{};
+  const [fyStartMonth,setFyStartMonth]=useState(fy.fiscalYearStart?.month||1);
+  const [fyStartDay,setFyStartDay]=useState(fy.fiscalYearStart?.day||1);
+  const [fyEndMonth,setFyEndMonth]=useState(fy.fiscalYearEnd?.month||12);
+  const [fyEndDay,setFyEndDay]=useState(fy.fiscalYearEnd?.day||31);
+  const [sbUrl,setSbUrl]=useState(fy.supabase?.url||'');
+  const [sbKey,setSbKey]=useState(fy.supabase?.anonKey||'');
+
+  const handleImport=e=>{const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=ev=>importData(ev.target.result);r.readAsText(file);};
+  const saveFiscalYear=()=>{updateSettings({fiscalYearStart:{month:parseInt(fyStartMonth),day:parseInt(fyStartDay)},fiscalYearEnd:{month:parseInt(fyEndMonth),day:parseInt(fyEndDay)}});showToast('Fiscal year updated');};
+  const toggleArchive=year=>{const archived=archivedYears.includes(year)?archivedYears.filter(y=>y!==year):[...archivedYears,year];updateSettings({archivedYears:archived});showToast(archivedYears.includes(year)?'Year unarchived':'Year archived');};
+  const saveSupabase=()=>{updateSettings({supabase:{url:sbUrl,anonKey:sbKey,enabled:!!(sbUrl&&sbKey)}});showToast('Supabase settings saved');};
+
+  const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  return <div className="fade-in">
+    <div className="page-header"><h2>Settings</h2><p>Manage groups, fiscal year, and data sync</p></div>
+
+    {/* Customer Groups */}
+    <div className="card"><div className="card-header"><h3>Customer Groups</h3><button className="btn btn-primary btn-sm" onClick={()=>{setEditGroup(null);setShowGroupModal(true);}}><Icon name="plus" size={14}/>Add Group</button></div>
+      <table><thead><tr><th>Group Name</th><th>Members</th><th></th></tr></thead><tbody>
+        {data.customerGroups.map((g,i)=><tr key={i}><td style={{fontWeight:600}}>{g.name}</td><td>{g.members.join(', ')}</td><td style={{textAlign:'right'}}>
+          <button className="btn-icon" style={{marginRight:4}} onClick={()=>{setEditGroup(i);setShowGroupModal(true);}}><Icon name="edit" size={14}/></button>
+          <button className="btn-icon" onClick={()=>{if(confirm('Delete this group?'))deleteGroup(i);}}><Icon name="trash" size={14}/></button></td></tr>)}
+      </tbody></table>
+    </div>
+
+    {/* Fiscal Year */}
+    <div className="card"><div className="card-header"><h3>Fiscal Year Configuration</h3></div>
+      <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:12}}>Define custom start/end dates for your order year. Orders are categorized into fiscal years based on their order date.</p>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr auto',gap:12,alignItems:'end'}}>
+        <div className="form-group"><label>Start Month</label><select value={fyStartMonth} onChange={e=>setFyStartMonth(e.target.value)}>{months.map((m,i)=><option key={i} value={i+1}>{m}</option>)}</select></div>
+        <div className="form-group"><label>Start Day</label><input type="number" min="1" max="31" value={fyStartDay} onChange={e=>setFyStartDay(e.target.value)}/></div>
+        <div className="form-group"><label>End Month</label><select value={fyEndMonth} onChange={e=>setFyEndMonth(e.target.value)}>{months.map((m,i)=><option key={i} value={i+1}>{m}</option>)}</select></div>
+        <div className="form-group"><label>End Day</label><input type="number" min="1" max="31" value={fyEndDay} onChange={e=>setFyEndDay(e.target.value)}/></div>
+        <button className="btn btn-primary" onClick={saveFiscalYear}>Save</button>
+      </div>
+    </div>
+
+    {/* Year Archive */}
+    <div className="card"><div className="card-header"><h3>Year Archive</h3></div>
+      <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:12}}>Archive previous years to hide them from the default view. Archived years can still be accessed via the "Show Archived" toggle on the Orders screen.</p>
+      <div style={{display:'flex',flexWrap:'wrap',gap:8}}>
+        {availableYears.map(y=><div key={y} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 14px',border:'1px solid var(--border)',borderRadius:6,background:archivedYears.includes(y)?'#f1f5f9':'#fff'}}>
+          <span style={{fontWeight:600,fontSize:14}}>{y}</span>
+          <button className="btn btn-sm btn-secondary" onClick={()=>toggleArchive(y)}>{archivedYears.includes(y)?'Unarchive':'Archive'}</button>
+        </div>)}
+      </div>
+    </div>
+
+    {/* Supabase */}
+    <div className="card"><div className="card-header"><h3><Icon name="cloud" size={18} style={{marginRight:6}}/>Supabase Multi-User Sync</h3>
+      <span className={`sb-status ${sbConnected?'sb-connected':'sb-disconnected'}`}><span className={`status-dot ${sbConnected?'dot-paid':'dot-pending'}`}></span>{sbConnected?'Connected':'Disconnected'}</span></div>
+      <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:12}}>Connect to a Supabase project to enable real-time multi-user access. All users connected to the same project will see live updates. Without Supabase, data is stored locally in the browser.</p>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+        <div className="form-group"><label>Supabase Project URL</label><input placeholder="https://xxxx.supabase.co" value={sbUrl} onChange={e=>setSbUrl(e.target.value)}/></div>
+        <div className="form-group"><label>Anon / Public Key</label><input placeholder="eyJhbGciOi..." value={sbKey} onChange={e=>setSbKey(e.target.value)}/></div>
+      </div>
+      <div style={{display:'flex',gap:8,marginTop:8}}><button className="btn btn-primary" onClick={saveSupabase}>Save & Connect</button>
+        {sbConnected&&<button className="btn btn-secondary" onClick={()=>{updateSettings({supabase:{url:'',anonKey:'',enabled:false}});showToast('Disconnected');}}>Disconnect</button>}
+      </div>
+    </div>
+
+    {/* Data Management */}
+    <div className="card"><div className="card-header"><h3>Data Management</h3></div>
+      <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
+        <button className="btn btn-secondary" onClick={exportData}><Icon name="download" size={16}/>Export Data (JSON)</button>
+        <button className="btn btn-secondary" onClick={()=>fileRef.current.click()}><Icon name="upload" size={16}/>Import Data</button>
+        <input ref={fileRef} type="file" accept=".json" style={{display:'none'}} onChange={handleImport}/>
+        <button className="btn btn-danger" onClick={()=>{if(confirm('Reset all data to defaults? This cannot be undone.')){setData(INITIAL_DATA);showToast('Data reset');}}}>Reset to Defaults</button>
+      </div>
+    </div>
+    {showGroupModal&&<GroupModal groupIndex={editGroup} onClose={()=>setShowGroupModal(false)}/>}
+  </div>;
+}
+
+function GroupModal({groupIndex,onClose}) {
+  const {data,addGroup,updateGroup}=useApp();
+  const existing=groupIndex!==null?data.customerGroups[groupIndex]:null;
+  const [name,setName]=useState(existing?.name||'');const [members,setMembers]=useState(existing?.members||[]);const [search,setSearch]=useState('');
+  const toggle=c=>setMembers(ms=>ms.includes(c)?ms.filter(m=>m!==c):[...ms,c]);
+  const save=()=>{if(!name){alert('Enter group name');return;}if(members.length<2){alert('Add at least 2 members');return;}if(existing)updateGroup(groupIndex,{name,members});else addGroup({name,members});onClose();};
+  return <Modal title={existing?'Edit Group':'New Group'} onClose={onClose}>
+    <div className="modal-body">
+      <div className="form-group"><label>Group Name</label><input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g., Webster Ag"/></div>
+      <div className="form-group"><label>Members</label><input placeholder="Search customers..." value={search} onChange={e=>setSearch(e.target.value)} style={{marginBottom:8}}/>
+        <div style={{maxHeight:250,overflowY:'auto',border:'1px solid var(--border)',borderRadius:6}}>
+          {ALL_CUSTOMERS.filter(c=>c.toLowerCase().includes(search.toLowerCase())).map(c=><label key={c} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 12px',cursor:'pointer',fontSize:13,background:members.includes(c)?'var(--primary-bg)':''}}>
+            <input type="checkbox" checked={members.includes(c)} onChange={()=>toggle(c)} style={{width:'auto'}}/>{c}</label>)}
+        </div></div>
+      {members.length>0&&<div style={{marginTop:8}}><span style={{fontSize:12,color:'var(--text-secondary)'}}>Selected: </span>{members.map(m=><span key={m} className="tag" style={{marginRight:4}}>{m}</span>)}</div>}
+    </div>
+    <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={save}>Save Group</button></div>
+  </Modal>;
+}
+
+// ══════════════════
+// ── MAIN APP ──
+// ══════════════════
+function App() {
+  const {toast,activeYear,setActiveYear,visibleYears,sbConnected} = useApp();
+  const [page,setPage] = useState('dashboard');
+  const [pageArg,setPageArg] = useState(null);
+  const [sidebarOpen,setSidebarOpen] = useState(false);
+  const navigate=(pg,arg)=>{setPage(pg);setPageArg(arg||null);setSidebarOpen(false);};
+  const navItems=[{id:'dashboard',label:'Dashboard',icon:'dashboard'},{id:'inventory',label:'Inventory',icon:'inventory'},{id:'orders',label:'Orders',icon:'orders'},{id:'deliveries',label:'Deliveries',icon:'truck'},{id:'customers',label:'Customers',icon:'users'},{id:'settings',label:'Settings',icon:'settings'}];
+  const renderPage=()=>{switch(page){case'dashboard':return<Dashboard/>;case'inventory':return<InventoryScreen/>;case'orders':return<OrdersScreen onNavigate={navigate}/>;case'deliveries':return<DeliveriesScreen onNavigate={navigate}/>;case'customers':return<CustomersScreen onNavigate={navigate}/>;case'customer-detail':return<CustomerDetail customerName={pageArg} onBack={()=>navigate('customers')}/>;case'settings':return<SettingsScreen/>;default:return<Dashboard/>;}};
+  return <>
+    <div className="mobile-header"><button className="hamburger" onClick={()=>setSidebarOpen(!sidebarOpen)}><Icon name="menu" size={24}/></button><h1>Quantum Ag</h1><div style={{width:24}}></div></div>
+    <div className={`sidebar ${sidebarOpen?'open':''}`}>
+      <div className="sidebar-header"><h1>Quantum Ag</h1><p>Inventory & Delivery Tracker</p></div>
+      <div className="nav-items">
+        {navItems.map(n=><div key={n.id} className={`nav-item ${page===n.id?'active':''}`} onClick={()=>navigate(n.id)}><Icon name={n.icon}/>{n.label}</div>)}
+      </div>
+      <div className="year-select"><span>Year:</span><select value={activeYear} onChange={e=>setActiveYear(e.target.value)}>{visibleYears.map(y=><option key={y} value={y}>{y}</option>)}</select></div>
+      <div style={{padding:'8px 12px',borderTop:'1px solid #1e293b',fontSize:11,color:'#475569',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <span>v3.0</span>
+        <span className={`sb-status ${sbConnected?'sb-connected':'sb-disconnected'}`} style={{padding:'2px 8px',fontSize:10}}>
+          <span className={`status-dot ${sbConnected?'dot-paid':'dot-pending'}`}></span>{sbConnected?'Synced':'Local'}
+        </span>
+      </div>
+    </div>
+    <div className="main">{renderPage()}</div>
+    {toast&&<div className="toast">{toast}</div>}
+  </>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<AppProvider><App/></AppProvider>);
+</script>
+</body>
+</html>
