@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -88,6 +89,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--primary-light);box-sh
 .chip{padding:4px 12px;border-radius:99px;font-size:12px;cursor:pointer;border:1px solid var(--border);background:#fff;transition:all .15s}
 .chip.selected{background:var(--primary);color:#fff;border-color:var(--primary)}
 .inv-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.spreadsheet-wrap{overflow:visible;padding:0}
+.spreadsheet-scroll{overflow-x:scroll;overflow-y:auto;max-height:75vh;-webkit-overflow-scrolling:touch;display:block}
+.spreadsheet-scroll table{width:auto !important;border-collapse:collapse;table-layout:auto}
 .product-col{min-width:80px;max-width:120px}
 .drill-panel{background:#fff;border:2px solid var(--primary);border-radius:var(--radius);padding:20px;margin-bottom:20px;animation:slideDown .25s ease-out}
 @keyframes slideDown{from{opacity:0;max-height:0;padding:0 20px}to{opacity:1;max-height:2000px}}
@@ -124,7 +128,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--primary-light);box-sh
 const {useState,useEffect,useCallback,useMemo,createContext,useContext,useRef} = React;
 
 // ── APP VERSION ──
-const APP_VERSION = '3.0';
+const APP_VERSION = '3.2';
 
 // ── MASTER DATA ──
 const ALL_PRODUCTS = [
@@ -220,6 +224,7 @@ const INITIAL_DATA = {
   settings: {
     fiscalYearStart:{month:1,day:1},
     fiscalYearEnd:{month:12,day:31},
+    fiscalYearLabel:'end',
     archivedYears:[],
     supabase:{url:'',anonKey:'',enabled:false}
   }
@@ -231,7 +236,31 @@ const fmt = n => n==null?'—':typeof n==='number'?n.toLocaleString('en-US',{max
 const fmtDate = d => {if(!d)return '—';const dt=new Date(d+'T00:00:00');return isNaN(dt)?'—':dt.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})};
 const today = () => new Date().toISOString().split('T')[0];
 
-function getFiscalYear(dateStr, fyStart) {
+// ── SORT HOOK ──
+function useSort(defaultKey,defaultDir='asc') {
+  const [sortKey,setSortKey] = useState(defaultKey||null);
+  const [sortDir,setSortDir] = useState(defaultDir);
+  const toggleSort = key => {if(sortKey===key){setSortDir(d=>d==='asc'?'desc':'asc');}else{setSortKey(key);setSortDir('asc');}};
+  const sortFn = (rows,getVal) => {
+    if(!sortKey) return rows;
+    return [...rows].sort((a,b)=>{
+      let va=getVal(a,sortKey),vb=getVal(b,sortKey);
+      if(va==null) va='';if(vb==null) vb='';
+      if(typeof va==='string'&&typeof vb==='string'){const c=va.localeCompare(vb,undefined,{numeric:true,sensitivity:'base'});return sortDir==='asc'?c:-c;}
+      const na=typeof va==='number'?va:parseFloat(va)||0;const nb=typeof vb==='number'?vb:parseFloat(vb)||0;
+      return sortDir==='asc'?na-nb:nb-na;
+    });
+  };
+  return {sortKey,sortDir,toggleSort,sortFn};
+}
+function SortTh({label,sortKey,colKey,sortDir,onSort,style,...rest}) {
+  const active=sortKey===colKey;
+  return <th style={{cursor:'pointer',userSelect:'none',...style}} onClick={()=>onSort(colKey)} {...rest}>
+    <span style={{display:'inline-flex',alignItems:'center',gap:3}}>{label}<span style={{fontSize:9,opacity:active?1:0.3,transition:'opacity .15s'}}>{active?(sortDir==='asc'?'▲':'▼'):'▲'}</span></span>
+  </th>;
+}
+
+function getFiscalYear(dateStr, fyStart, fyLabel) {
   if(!dateStr) return 'Undated';
   const d = new Date(dateStr+'T00:00:00');
   if(isNaN(d)) return 'Undated';
@@ -240,13 +269,17 @@ function getFiscalYear(dateStr, fyStart) {
   const day = d.getDate();
   const sm = fyStart?.month||1; const sd = fyStart?.day||1;
   if(sm===1&&sd===1) return String(year);
-  if(month>sm||(month===sm&&day>=sd)) return year+'-'+(year+1);
-  return (year-1)+'-'+year;
+  const startYear = (month>sm||(month===sm&&day>=sd)) ? year : year-1;
+  const endYear = startYear+1;
+  const lbl = fyLabel||'range';
+  if(lbl==='end') return String(endYear);
+  if(lbl==='start') return String(startYear);
+  return startYear+'-'+endYear;
 }
-function getAvailableYears(orders, fyStart) {
+function getAvailableYears(orders, fyStart, fyLabel) {
   const years = new Set();
-  orders.forEach(o=>years.add(getFiscalYear(o.date,fyStart)));
-  if(years.size===0) years.add(getFiscalYear(today(),fyStart));
+  orders.forEach(o=>years.add(getFiscalYear(o.date,fyStart,fyLabel)));
+  if(years.size===0) years.add(getFiscalYear(today(),fyStart,fyLabel));
   return [...years].sort().reverse();
 }
 
@@ -276,6 +309,8 @@ const Icon = ({name,...p}) => {
     down:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>,
     alert:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>,
     cloud:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z"/></svg>,
+    list:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>,
+    grid:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>,
   };
   return <span style={{display:'inline-flex',width:p.size||18,height:p.size||18}} {...p}>{icons[name]}</span>;
 };
@@ -306,7 +341,7 @@ function AppProvider({children}) {
   });
   const [toast,setToast] = useState(null);
   const [sbConnected,setSbConnected] = useState(false);
-  const [activeYear,setActiveYear] = useState(()=>getFiscalYear(today(),data.settings?.fiscalYearStart));
+  const [activeYear,setActiveYear] = useState(()=>getFiscalYear(today(),data.settings?.fiscalYearStart,data.settings?.fiscalYearLabel));
 
   useEffect(()=>{localStorage.setItem('quantumag_data',JSON.stringify(data));localStorage.setItem('quantumag_version',APP_VERSION);},[data]);
 
@@ -355,13 +390,14 @@ function AppProvider({children}) {
   const saveDeliveryTicket=t=>{updateData(d=>({...d,deliveryTickets:[...d.deliveryTickets,{...t,id:uid(),savedAt:today()}]}));};
 
   const fyStart = data.settings?.fiscalYearStart||{month:1,day:1};
-  const availableYears = useMemo(()=>getAvailableYears(data.orders,fyStart),[data.orders,fyStart]);
+  const fyLabel = data.settings?.fiscalYearLabel||'end';
+  const availableYears = useMemo(()=>getAvailableYears(data.orders,fyStart,fyLabel),[data.orders,fyStart,fyLabel]);
   const archivedYears = data.settings?.archivedYears||[];
   const visibleYears = availableYears.filter(y=>!archivedYears.includes(y));
 
   const yearOrders = useMemo(()=>{
-    return data.orders.filter(o=>getFiscalYear(o.date,fyStart)===activeYear);
-  },[data.orders,activeYear,fyStart]);
+    return data.orders.filter(o=>getFiscalYear(o.date,fyStart,fyLabel)===activeYear);
+  },[data.orders,activeYear,fyStart,fyLabel]);
 
   const activeProducts = useMemo(()=>{
     const used = new Set();
@@ -383,7 +419,7 @@ function AppProvider({children}) {
   const exportData=()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='quantum-ag-backup-'+today()+'.json';a.click();URL.revokeObjectURL(u);showToast('Exported');};
   const importData=json=>{try{setData(JSON.parse(json));showToast('Imported');}catch(e){showToast('Invalid file');}};
 
-  return <AppContext.Provider value={{data,setData:updateData,activeProducts,activeCustomers,updateInventory,addInventory,addOrder,updateOrder,deleteOrder,addDelivery,updateDelivery,addGroup,updateGroup,deleteGroup,updateSettings,saveDeliveryTicket,getProductTotalSold,getProductDelivered,getProductAvailable,getProductSoldNotDelivered,exportData,importData,showToast,toast,sbConnected,activeYear,setActiveYear,availableYears,visibleYears,archivedYears,yearOrders,fyStart}}>{children}</AppContext.Provider>;
+  return <AppContext.Provider value={{data,setData:updateData,activeProducts,activeCustomers,updateInventory,addInventory,addOrder,updateOrder,deleteOrder,addDelivery,updateDelivery,addGroup,updateGroup,deleteGroup,updateSettings,saveDeliveryTicket,getProductTotalSold,getProductDelivered,getProductAvailable,getProductSoldNotDelivered,exportData,importData,showToast,toast,sbConnected,activeYear,setActiveYear,availableYears,visibleYears,archivedYears,yearOrders,fyStart,fyLabel}}>{children}</AppContext.Provider>;
 }
 
 // ── MODAL ──
@@ -558,28 +594,64 @@ function InventoryScreen() {
   const [addNote,setAddNote] = useState('');
   const [editModal,setEditModal] = useState(null);
   const [editVal,setEditVal] = useState('');
+  // Bulk add state
+  const [bulkModal,setBulkModal] = useState(false);
+  const [bulkDate,setBulkDate] = useState(today());
+  const [bulkNote,setBulkNote] = useState('');
+  const [bulkSelected,setBulkSelected] = useState({});
+  const [bulkQtys,setBulkQtys] = useState({});
+  const {sortKey:invSK,sortDir:invSD,toggleSort:invToggle,sortFn:invSort} = useSort('name');
 
   const handleAdd=()=>{if(!addQty||isNaN(addQty))return;addInventory(addModal,{date:addDate,qty:parseFloat(addQty),note:addNote});setAddModal(null);setAddQty('');setAddNote('');showToast('Inventory added');};
 
+  const invRows = useMemo(()=>{
+    const rows=activeProducts.map(p=>{
+      const inv=data.inventory[p.id]||{starting:0,additions:[]};const added=inv.additions.reduce((s,a)=>s+a.qty,0);
+      return{...p,inv,added,sold:getProductTotalSold(p.id),delivered:getProductDelivered(p.id),snd:getProductSoldNotDelivered(p.id),avail:getProductAvailable(p.id)};
+    });
+    return invSort(rows,(r,k)=>{switch(k){case'name':return r.name;case'starting':return r.inv.starting;case'added':return r.added;case'sold':return r.sold;case'delivered':return r.delivered;case'snd':return r.snd;case'avail':return r.avail;default:return r.name;}});
+  },[activeProducts,data.inventory,getProductTotalSold,getProductDelivered,getProductSoldNotDelivered,getProductAvailable,invSK,invSD]);
+
+  const openBulkModal=()=>{setBulkModal(true);setBulkDate(today());setBulkNote('');setBulkSelected({});setBulkQtys({});};
+  const toggleBulkProduct=(pid)=>{setBulkSelected(s=>({...s,[pid]:!s[pid]}));};
+  const selectAllBulk=()=>{const all={};activeProducts.forEach(p=>{all[p.id]=true;});setBulkSelected(all);};
+  const clearAllBulk=()=>{setBulkSelected({});setBulkQtys({});};
+  const setBulkQty=(pid,val)=>{setBulkQtys(q=>({...q,[pid]:val}));};
+  const selectedCount=Object.values(bulkSelected).filter(Boolean).length;
+  const handleBulkAdd=()=>{
+    let count=0;
+    const entries=Object.entries(bulkSelected).filter(([_,v])=>v);
+    entries.forEach(([pid])=>{
+      const q=parseFloat(bulkQtys[pid]);
+      if(q&&!isNaN(q)&&q>0){addInventory(pid,{date:bulkDate,qty:q,note:bulkNote||'Bulk addition'});count++;}
+    });
+    if(count===0){showToast('Enter quantities for selected products');return;}
+    setBulkModal(false);showToast(count+' product'+(count>1?'s':'')+' updated');
+  };
+
   return (
     <div className="fade-in">
-      <div className="page-header"><h2>Inventory Management</h2><p>Track starting, added, and available inventory by product</p></div>
+      <div className="page-header" style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+        <div><h2>Inventory Management</h2><p>Track starting, added, and available inventory by product</p></div>
+        <button className="btn btn-primary" onClick={openBulkModal}><Icon name="plus" size={14}/>Bulk Add Inventory</button>
+      </div>
       <div className="card"><div className="inv-table-wrap"><table>
-        <thead><tr><th>Product</th><th style={{textAlign:'right'}}>Starting</th><th style={{textAlign:'right'}}>Added</th><th style={{textAlign:'right'}}>Total Sold</th><th style={{textAlign:'right'}}>Delivered</th><th style={{textAlign:'right'}}>Sold, Not Delivered</th><th style={{textAlign:'right'}}>Available</th><th></th></tr></thead>
-        <tbody>{activeProducts.map(p=>{
-          const inv=data.inventory[p.id]||{starting:0,additions:[]};const added=inv.additions.reduce((s,a)=>s+a.qty,0);const sold=getProductTotalSold(p.id);const delivered=getProductDelivered(p.id);const snd=getProductSoldNotDelivered(p.id);const avail=getProductAvailable(p.id);
+        <thead><tr><SortTh label="Product" colKey="name" sortKey={invSK} sortDir={invSD} onSort={invToggle}/><SortTh label="Starting" colKey="starting" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/><SortTh label="Added" colKey="added" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/><SortTh label="Total Sold" colKey="sold" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/><SortTh label="Delivered" colKey="delivered" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/><SortTh label="Sold, Not Delivered" colKey="snd" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/><SortTh label="Available" colKey="avail" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/><th></th></tr></thead>
+        <tbody>{invRows.map(p=>{
           return <tr key={p.id}>
             <td style={{fontWeight:500}}>{p.name}</td>
-            <td className="inv-cell" style={{cursor:'pointer',textDecoration:'underline dotted'}} onClick={()=>{setEditModal(p.id);setEditVal(inv.starting);}}>{fmt(inv.starting)}</td>
-            <td className="inv-cell positive">{added>0?'+'+fmt(added):'—'}{inv.additions.length>0&&<div style={{fontSize:10,color:'#94a3b8'}}>{inv.additions.length} addition{inv.additions.length>1?'s':''}</div>}</td>
-            <td className="inv-cell">{fmt(sold)}</td>
-            <td className="inv-cell" style={{color:'var(--success)'}}>{fmt(delivered)}</td>
-            <td className="inv-cell" style={{color:snd>0?'var(--warning)':'inherit',fontWeight:snd>0?600:400}}>{fmt(Math.max(0,snd))}</td>
-            <td className={`inv-cell ${avail<0?'negative':'positive'}`} style={{fontWeight:700}}>{fmt(avail)}</td>
+            <td className="inv-cell" style={{cursor:'pointer',textDecoration:'underline dotted'}} onClick={()=>{setEditModal(p.id);setEditVal(p.inv.starting);}}>{fmt(p.inv.starting)}</td>
+            <td className="inv-cell positive">{p.added>0?'+'+fmt(p.added):'—'}{p.inv.additions.length>0&&<div style={{fontSize:10,color:'#94a3b8'}}>{p.inv.additions.length} addition{p.inv.additions.length>1?'s':''}</div>}</td>
+            <td className="inv-cell">{fmt(p.sold)}</td>
+            <td className="inv-cell" style={{color:'var(--success)'}}>{fmt(p.delivered)}</td>
+            <td className="inv-cell" style={{color:p.snd>0?'var(--warning)':'inherit',fontWeight:p.snd>0?600:400}}>{fmt(Math.max(0,p.snd))}</td>
+            <td className={`inv-cell ${p.avail<0?'negative':'positive'}`} style={{fontWeight:700}}>{fmt(p.avail)}</td>
             <td><button className="btn btn-sm btn-secondary" onClick={()=>setAddModal(p.id)}><Icon name="plus" size={14}/>Add</button></td>
           </tr>;
         })}</tbody>
       </table></div></div>
+
+      {/* Single product add modal */}
       {addModal&&<Modal title={`Add Inventory — ${ALL_PRODUCTS.find(p=>p.id===addModal)?.name}`} onClose={()=>setAddModal(null)}>
         <div className="modal-body">
           <div className="form-group"><label>Date</label><input type="date" value={addDate} onChange={e=>setAddDate(e.target.value)}/></div>
@@ -589,6 +661,49 @@ function InventoryScreen() {
         </div>
         <div className="modal-footer"><button className="btn btn-secondary" onClick={()=>setAddModal(null)}>Cancel</button><button className="btn btn-primary" onClick={handleAdd}>Add Inventory</button></div>
       </Modal>}
+
+      {/* Bulk add modal */}
+      {bulkModal&&<div className="modal-overlay" onClick={e=>{if(e.target===e.currentTarget)setBulkModal(false);}}>
+        <div className="modal" style={{maxWidth:700}}>
+          <div className="modal-header"><h3>Bulk Add Inventory</h3><button className="btn-icon" onClick={()=>setBulkModal(false)}><Icon name="x" size={16}/></button></div>
+          <div className="modal-body">
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:16}}>
+              <div className="form-group"><label>Date</label><input type="date" value={bulkDate} onChange={e=>setBulkDate(e.target.value)}/></div>
+              <div className="form-group"><label>Note (optional)</label><input placeholder="e.g., Spring restock" value={bulkNote} onChange={e=>setBulkNote(e.target.value)}/></div>
+            </div>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+              <span style={{fontSize:13,fontWeight:600,color:'var(--text-secondary)'}}>{selectedCount} product{selectedCount!==1?'s':''} selected</span>
+              <div style={{display:'flex',gap:8}}>
+                <button className="btn btn-sm btn-secondary" onClick={selectAllBulk}>Select All</button>
+                <button className="btn btn-sm btn-secondary" onClick={clearAllBulk}>Clear All</button>
+              </div>
+            </div>
+            <div style={{maxHeight:400,overflowY:'auto',border:'1px solid var(--border)',borderRadius:6}}>
+              <table>
+                <thead><tr><th style={{width:36}}></th><th>Product</th><th style={{textAlign:'right',width:100}}>Current</th><th style={{width:120}}>Add Qty</th></tr></thead>
+                <tbody>{activeProducts.map(p=>{
+                  const inv=data.inventory[p.id]||{starting:0,additions:[]};
+                  const added=inv.additions.reduce((s,a)=>s+a.qty,0);
+                  const avail=getProductAvailable(p.id);
+                  const sel=!!bulkSelected[p.id];
+                  return <tr key={p.id} style={{background:sel?'var(--primary-bg)':'transparent',cursor:'pointer'}} onClick={()=>toggleBulkProduct(p.id)}>
+                    <td style={{textAlign:'center'}}><input type="checkbox" checked={sel} onChange={()=>toggleBulkProduct(p.id)} onClick={e=>e.stopPropagation()} style={{width:'auto',cursor:'pointer'}}/></td>
+                    <td style={{fontWeight:500}}>{p.name}</td>
+                    <td className={`inv-cell ${avail<0?'negative':'positive'}`} style={{fontWeight:600}}>{fmt(avail)}</td>
+                    <td onClick={e=>e.stopPropagation()}><input type="number" step="0.1" placeholder="0" disabled={!sel} value={bulkQtys[p.id]||''} onChange={e=>setBulkQty(p.id,e.target.value)} style={{opacity:sel?1:0.4,textAlign:'right',padding:'5px 8px'}}/></td>
+                  </tr>;
+                })}</tbody>
+              </table>
+            </div>
+          </div>
+          <div className="modal-footer">
+            <button className="btn btn-secondary" onClick={()=>setBulkModal(false)}>Cancel</button>
+            <button className="btn btn-primary" disabled={selectedCount===0} onClick={handleBulkAdd}><Icon name="plus" size={14}/>Add to {selectedCount} Product{selectedCount!==1?'s':''}</button>
+          </div>
+        </div>
+      </div>}
+
+      {/* Edit starting inventory modal */}
       {editModal&&<Modal title={`Edit Starting Inventory — ${ALL_PRODUCTS.find(p=>p.id===editModal)?.name}`} onClose={()=>setEditModal(null)}>
         <div className="modal-body"><div className="form-group"><label>Starting Inventory</label><input type="number" step="0.1" value={editVal} onChange={e=>setEditVal(e.target.value)}/></div></div>
         <div className="modal-footer"><button className="btn btn-secondary" onClick={()=>setEditModal(null)}>Cancel</button><button className="btn btn-primary" onClick={()=>{updateInventory(editModal,'starting',parseFloat(editVal)||0);setEditModal(null);showToast('Updated');}}>Save</button></div>
@@ -601,12 +716,15 @@ function InventoryScreen() {
 // ── ORDERS SCREEN ──
 // ══════════════════════
 function OrdersScreen({onNavigate}) {
-  const {data,yearOrders,activeYear,setActiveYear,visibleYears,archivedYears,fyStart,deleteOrder} = useApp();
+  const {data,yearOrders,activeYear,setActiveYear,visibleYears,archivedYears,fyStart,fyLabel,deleteOrder,activeProducts} = useApp();
   const [showAdd,setShowAdd] = useState(false);
   const [filter,setFilter] = useState('all');
   const [search,setSearch] = useState('');
   const [editOrder,setEditOrder] = useState(null);
   const [showArchived,setShowArchived] = useState(false);
+  const [viewMode,setViewMode] = useState('list'); // 'list' or 'matrix'
+  const {sortKey:olSK,sortDir:olSD,toggleSort:olToggle,sortFn:olSort} = useSort(null);
+  const {sortKey:mSK,sortDir:mSD,toggleSort:mToggle,sortFn:mSort} = useSort('customer');
 
   const allYears = showArchived ? [...visibleYears,...archivedYears].sort().reverse() : visibleYears;
 
@@ -614,8 +732,36 @@ function OrdersScreen({onNavigate}) {
     let orders=[...yearOrders];
     if(filter!=='all')orders=orders.filter(o=>o.status===filter);
     if(search)orders=orders.filter(o=>o.customer.toLowerCase().includes(search.toLowerCase()));
-    return orders.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
-  },[yearOrders,filter,search]);
+    if(!olSK) orders.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
+    else orders=olSort(orders,(o,k)=>{switch(k){case'customer':return o.customer;case'date':return o.date||'';case'products':return Object.keys(o.products).filter(x=>o.products[x]>0).length;case'status':return o.status;case'invoiced':return o.invoiced?1:0;default:return o.customer;}});
+    return orders;
+  },[yearOrders,filter,search,olSK,olSD]);
+
+  // Spreadsheet view: determine which products are used across all visible orders
+  const spreadsheetProducts = useMemo(()=>{
+    const used=new Set();
+    yearOrders.forEach(o=>Object.keys(o.products).forEach(pid=>{if(o.products[pid]>0)used.add(pid);}));
+    return ALL_PRODUCTS.filter(p=>used.has(p.id));
+  },[yearOrders]);
+
+  // Group orders by customer for spreadsheet view, aggregate if multiple orders per customer
+  const spreadsheetRows = useMemo(()=>{
+    const map={};
+    const fOrders = filter!=='all' ? yearOrders.filter(o=>o.status===filter) : yearOrders;
+    const sOrders = search ? fOrders.filter(o=>o.customer.toLowerCase().includes(search.toLowerCase())) : fOrders;
+    sOrders.forEach(o=>{
+      if(!map[o.customer]) map[o.customer]={customer:o.customer,products:{},status:o.status,orderCount:0};
+      map[o.customer].orderCount++;
+      Object.entries(o.products).forEach(([pid,qty])=>{if(qty>0)map[o.customer].products[pid]=(map[o.customer].products[pid]||0)+qty;});
+    });
+    const rows=Object.values(map);
+    return mSort(rows,(r,k)=>{if(k==='customer')return r.customer;if(k==='status')return r.status;const p=spreadsheetProducts.find(x=>x.id===k);return p?r.products[k]||0:r.customer;});
+  },[yearOrders,filter,search,mSK,mSD]);
+
+  // Column totals for spreadsheet
+  const colTotals = useMemo(()=>{
+    const t={};spreadsheetProducts.forEach(p=>{t[p.id]=spreadsheetRows.reduce((s,r)=>s+(r.products[p.id]||0),0);});return t;
+  },[spreadsheetProducts,spreadsheetRows]);
 
   return (
     <div className="fade-in">
@@ -629,15 +775,23 @@ function OrdersScreen({onNavigate}) {
           <button className="btn btn-primary" onClick={()=>setShowAdd(true)}><Icon name="plus" size={16}/>New Order</button>
         </div>
       </div>
+
+      {/* View toggle */}
       <div className="card" style={{padding:'12px 16px',display:'flex',gap:12,alignItems:'center',flexWrap:'wrap'}}>
+        <div style={{display:'flex',gap:0,border:'1px solid var(--border)',borderRadius:6,overflow:'hidden',marginRight:8}}>
+          <button onClick={()=>setViewMode('list')} style={{padding:'6px 14px',fontSize:12,fontWeight:600,cursor:'pointer',border:'none',background:viewMode==='list'?'var(--primary)':'#fff',color:viewMode==='list'?'#fff':'var(--text-secondary)',transition:'all .15s',display:'flex',alignItems:'center',gap:4}}><Icon name="list" size={14}/>List</button>
+          <button onClick={()=>setViewMode('matrix')} style={{padding:'6px 14px',fontSize:12,fontWeight:600,cursor:'pointer',border:'none',borderLeft:'1px solid var(--border)',background:viewMode==='matrix'?'var(--primary)':'#fff',color:viewMode==='matrix'?'#fff':'var(--text-secondary)',transition:'all .15s',display:'flex',alignItems:'center',gap:4}}><Icon name="grid" size={14}/>Matrix</button>
+        </div>
         <div className="search-box" style={{flex:1,minWidth:200}}><Icon name="search"/><input placeholder="Search customers..." value={search} onChange={e=>setSearch(e.target.value)}/></div>
-        <div className="chip-select">
+        {viewMode==='list'&&<div className="chip-select">
           <span className={`chip ${filter==='all'?'selected':''}`} onClick={()=>setFilter('all')}>All</span>
           {STATUS_OPTIONS.map(s=><span key={s.value} className={`chip ${filter===s.value?'selected':''}`} onClick={()=>setFilter(s.value)}>{s.label}</span>)}
-        </div>
+        </div>}
       </div>
-      <div className="card" style={{padding:0}}><div className="inv-table-wrap"><table>
-        <thead><tr><th>Customer</th><th>Order Date</th><th>Products</th><th>Status</th><th>Invoiced</th><th></th></tr></thead>
+
+      {/* List View */}
+      {viewMode==='list'&&<div className="card" style={{padding:0}}><div className="inv-table-wrap"><table>
+        <thead><tr><SortTh label="Customer" colKey="customer" sortKey={olSK} sortDir={olSD} onSort={olToggle}/><SortTh label="Order Date" colKey="date" sortKey={olSK} sortDir={olSD} onSort={olToggle}/><SortTh label="Products" colKey="products" sortKey={olSK} sortDir={olSD} onSort={olToggle}/><SortTh label="Status" colKey="status" sortKey={olSK} sortDir={olSD} onSort={olToggle}/><SortTh label="Invoiced" colKey="invoiced" sortKey={olSK} sortDir={olSD} onSort={olToggle}/><th></th></tr></thead>
         <tbody>{filtered.length===0?<tr><td colSpan="6" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No orders found</td></tr>:filtered.map(o=>{
           const st=getStatus(o.status);const pc=Object.keys(o.products).filter(k=>o.products[k]>0).length;
           return <tr key={o.id} style={{cursor:'pointer'}} onClick={()=>setEditOrder(o)}>
@@ -647,7 +801,47 @@ function OrdersScreen({onNavigate}) {
             <td style={{textAlign:'right'}}><button className="btn-icon" style={{marginRight:4}} onClick={e=>{e.stopPropagation();setEditOrder(o);}}><Icon name="edit" size={14}/></button><button className="btn-icon" onClick={e=>{e.stopPropagation();if(confirm('Delete?'))deleteOrder(o.id);}}><Icon name="trash" size={14}/></button></td>
           </tr>;
         })}</tbody>
-      </table></div></div>
+      </table></div></div>}
+
+      {/* Spreadsheet View (BWF Order Forecast style) */}
+      {viewMode==='matrix'&&<div className="card spreadsheet-wrap">
+        <div style={{padding:'12px 16px',borderBottom:'1px solid var(--border)',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <h3 style={{fontSize:14,fontWeight:600}}>BWF Order Forecast — {activeYear}</h3>
+          <span style={{fontSize:12,color:'var(--text-secondary)'}}>{spreadsheetRows.length} customers, {spreadsheetProducts.length} products</span>
+        </div>
+        <div className="spreadsheet-scroll">
+          <table style={{fontSize:11}}>
+            <colgroup>
+              <col style={{width:180}}/>
+              <col style={{width:50}}/>
+              {spreadsheetProducts.map(p=><col key={p.id} style={{width:95}}/>)}
+            </colgroup>
+            <thead>
+              <tr style={{position:'sticky',top:0,zIndex:2,background:'#f8fafc'}}>
+                <SortTh label="Customer" colKey="customer" sortKey={mSK} sortDir={mSD} onSort={mToggle} style={{position:'sticky',left:0,background:'#f8fafc',zIndex:3,whiteSpace:'nowrap'}}/>
+                <SortTh label="Status" colKey="status" sortKey={mSK} sortDir={mSD} onSort={mToggle} style={{textAlign:'center'}}/>
+                {spreadsheetProducts.map(p=><SortTh key={p.id} label={p.name} colKey={p.id} sortKey={mSK} sortDir={mSD} onSort={mToggle} style={{textAlign:'right',fontSize:10,padding:'8px 6px',whiteSpace:'nowrap'}}/>)}
+              </tr>
+            </thead>
+            <tbody>
+              {spreadsheetRows.length===0?<tr><td colSpan={spreadsheetProducts.length+2} style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No orders found</td></tr>:spreadsheetRows.map((r,ri)=>{
+                const st=getStatus(r.status);const bg=ri%2===0?'#fff':'#f8fafc';
+                return <tr key={r.customer} style={{cursor:'pointer',background:bg}} onClick={()=>{const o=yearOrders.find(o2=>o2.customer===r.customer);if(o)setEditOrder(o);}}>
+                  <td style={{fontWeight:500,position:'sticky',left:0,background:bg,zIndex:1,borderRight:'2px solid var(--border)',whiteSpace:'nowrap',padding:'6px 10px'}}>{r.customer}{r.orderCount>1&&<span style={{fontSize:9,color:'var(--text-secondary)',marginLeft:4}}>({r.orderCount})</span>}</td>
+                  <td style={{textAlign:'center'}}><span className={`status-dot ${st.dot}`} title={st.label} style={{display:'inline-block'}}></span></td>
+                  {spreadsheetProducts.map(p=>{const v=r.products[p.id];return <td key={p.id} className="inv-cell" style={{fontSize:11,padding:'6px 8px',color:v?'var(--text)':'#cbd5e1'}}>{v?fmt(v):'—'}</td>;})}
+                </tr>;
+              })}
+              <tr style={{fontWeight:700,background:'#f0f9ff',position:'sticky',bottom:0,zIndex:2}}>
+                <td style={{position:'sticky',left:0,background:'#f0f9ff',zIndex:3,borderRight:'2px solid var(--border)',fontWeight:700,borderTop:'2px solid var(--primary)',padding:'6px 10px'}}>TOTALS</td>
+                <td style={{background:'#f0f9ff',borderTop:'2px solid var(--primary)'}}></td>
+                {spreadsheetProducts.map(p=><td key={p.id} className="inv-cell" style={{fontWeight:700,fontSize:11,padding:'6px 8px',background:'#f0f9ff',borderTop:'2px solid var(--primary)'}}>{colTotals[p.id]?fmt(colTotals[p.id]):'—'}</td>)}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>}
+
       {(showAdd||editOrder)&&<OrderModal order={editOrder} onClose={()=>{setShowAdd(false);setEditOrder(null);}}/>}
     </div>
   );
@@ -661,6 +855,7 @@ function OrderModal({order,onClose}) {
   const [invoiced,setInvoiced] = useState(order?.invoiced||false);
   const [products,setProducts] = useState(order?.products||{});
   const [custSearch,setCustSearch] = useState('');
+  const [showAllProducts,setShowAllProducts] = useState(false);
   const filteredCust=ALL_CUSTOMERS.filter(c=>c.toLowerCase().includes(custSearch.toLowerCase()));
   const setProduct=(pid,val)=>{const v=parseFloat(val)||0;setProducts(p=>v>0?{...p,[pid]:v}:Object.fromEntries(Object.entries(p).filter(([k])=>k!==pid)));};
   const save=()=>{if(!customer){alert('Select a customer');return;}if(Object.keys(products).length===0){alert('Add at least one product');return;}if(order){updateOrder(order.id,{customer,date,status,invoiced,products});showToast('Order updated');}else addOrder({customer,date,status,invoiced,products});onClose();};
@@ -675,9 +870,20 @@ function OrderModal({order,onClose}) {
         <div className="form-group" style={{display:'flex',alignItems:'flex-end',paddingBottom:8}}><label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer'}}><input type="checkbox" checked={invoiced} onChange={e=>setInvoiced(e.target.checked)} style={{width:'auto'}}/>Invoiced</label></div>
       </div>
       <h4 style={{fontSize:14,fontWeight:600,margin:'16px 0 8px'}}>Products & Quantities</h4>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:8}}>
+      {order&&<div style={{marginBottom:8}}>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:8}}>
+          {ALL_PRODUCTS.filter(p=>products[p.id]>0).map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontSize:12,flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.name}</span><input type="number" step="0.1" style={{width:80}} placeholder="0" value={products[p.id]||''} onChange={e=>setProduct(p.id,e.target.value)}/></div>)}
+        </div>
+        {showAllProducts?<div style={{marginTop:8,paddingTop:8,borderTop:'1px dashed var(--border)'}}>
+          <p style={{fontSize:11,color:'var(--text-secondary)',marginBottom:6}}>Add more products:</p>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:8}}>
+            {ALL_PRODUCTS.filter(p=>!products[p.id]||products[p.id]<=0).map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontSize:12,flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:'var(--text-secondary)'}}>{p.name}</span><input type="number" step="0.1" style={{width:80}} placeholder="0" value={products[p.id]||''} onChange={e=>setProduct(p.id,e.target.value)}/></div>)}
+          </div>
+        </div>:<button className="btn btn-sm btn-secondary" style={{marginTop:8}} onClick={()=>setShowAllProducts(true)}><Icon name="plus" size={14}/>Add More Products</button>}
+      </div>}
+      {!order&&<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:8}}>
         {ALL_PRODUCTS.map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontSize:12,flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.name}</span><input type="number" step="0.1" style={{width:80}} placeholder="0" value={products[p.id]||''} onChange={e=>setProduct(p.id,e.target.value)}/></div>)}
-      </div>
+      </div>}
     </div>
     <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={save}>{order?'Save Changes':'Create Order'}</button></div>
   </Modal>;
@@ -689,27 +895,31 @@ function OrderModal({order,onClose}) {
 function CustomersScreen({onNavigate}) {
   const {data,activeCustomers} = useApp();
   const [search,setSearch] = useState('');
+  const {sortKey:cSK,sortDir:cSD,toggleSort:cToggle,sortFn:cSort} = useSort('name');
   const customerData=useMemo(()=>activeCustomers.map(name=>{
     const orders=data.orders.filter(o=>o.customer===name);const tp={};orders.forEach(o=>{Object.entries(o.products).forEach(([pid,qty])=>{tp[pid]=(tp[pid]||0)+qty;});});
-    const group=data.customerGroups.find(g=>g.members.includes(name));return{name,orders,totalProducts:tp,group:group?.name||null};
+    const group=data.customerGroups.find(g=>g.members.includes(name));const latest=orders.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0))[0];
+    return{name,orders,totalProducts:tp,group:group?.name||null,latest,latestDate:latest?.date||'',latestStatus:latest?latest.status:'pending'};
   }).filter(c=>c.name.toLowerCase().includes(search.toLowerCase())),[activeCustomers,data,search]);
 
+  const sortedCustomers=useMemo(()=>cSort(customerData,(c,k)=>{switch(k){case'name':return c.name;case'group':return c.group||'';case'orders':return c.orders.length;case'latest':return c.latestDate;case'status':return c.latestStatus;default:return c.name;}}),[customerData,cSK,cSD]);
+
   const groupData=useMemo(()=>data.customerGroups.map(g=>{
-    const members=customerData.filter(c=>g.members.includes(c.name));const tp={};members.forEach(m=>{Object.entries(m.totalProducts).forEach(([pid,qty])=>{tp[pid]=(tp[pid]||0)+qty;});});
+    const members=sortedCustomers.filter(c=>g.members.includes(c.name));const tp={};members.forEach(m=>{Object.entries(m.totalProducts).forEach(([pid,qty])=>{tp[pid]=(tp[pid]||0)+qty;});});
     return{...g,members,totalProducts:tp};
-  }),[data.customerGroups,customerData]);
+  }),[data.customerGroups,sortedCustomers]);
 
   return <div className="fade-in">
     <div className="page-header"><h2>Customers</h2><p>View customer orders and group totals</p></div>
     <div className="card" style={{padding:'12px 16px'}}><div className="search-box"><Icon name="search"/><input placeholder="Search customers..." value={search} onChange={e=>setSearch(e.target.value)}/></div></div>
     {groupData.map(g=><div key={g.name} className="card"><div className="card-header"><h3 style={{color:'var(--primary)'}}>{g.name} Group</h3><span className="tag">{g.members.length} members</span></div>
-      <table><thead><tr><th>Customer</th><th>Orders</th><th>Latest Date</th><th>Status</th><th></th></tr></thead><tbody>
-        {g.members.map(m=>{const latest=m.orders.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0))[0];const st=latest?getStatus(latest.status):getStatus('pending');return <tr key={m.name} style={{cursor:'pointer'}} onClick={()=>onNavigate('customer-detail',m.name)}><td style={{fontWeight:500}}>{m.name}</td><td>{m.orders.length}</td><td>{latest?fmtDate(latest.date):'—'}</td><td><span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span></td><td style={{textAlign:'right'}}><Icon name="chevron" size={16}/></td></tr>;})}
+      <table><thead><tr><SortTh label="Customer" colKey="name" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Orders" colKey="orders" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Latest Date" colKey="latest" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Status" colKey="status" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><th></th></tr></thead><tbody>
+        {g.members.map(m=>{const st=m.latest?getStatus(m.latest.status):getStatus('pending');return <tr key={m.name} style={{cursor:'pointer'}} onClick={()=>onNavigate('customer-detail',m.name)}><td style={{fontWeight:500}}>{m.name}</td><td>{m.orders.length}</td><td>{m.latest?fmtDate(m.latest.date):'—'}</td><td><span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span></td><td style={{textAlign:'right'}}><Icon name="chevron" size={16}/></td></tr>;})}
         <tr className="group-row"><td>{g.name} Total</td><td>{g.members.reduce((s,m)=>s+m.orders.length,0)}</td><td colSpan="3">{Object.entries(g.totalProducts).filter(([,v])=>v>0).slice(0,5).map(([pid,qty])=>{const p=ALL_PRODUCTS.find(x=>x.id===pid);return <span key={pid} className="tag" style={{marginRight:4}}>{p?.name}: {fmt(qty)}</span>;})}</td></tr>
       </tbody></table>
     </div>)}
-    <div className="card"><div className="card-header"><h3>All Customers</h3></div><table><thead><tr><th>Customer</th><th>Group</th><th>Orders</th><th>Latest</th><th>Status</th><th></th></tr></thead><tbody>
-      {customerData.map(c=>{const latest=c.orders.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0))[0];const st=latest?getStatus(latest.status):getStatus('pending');return <tr key={c.name} style={{cursor:'pointer'}} onClick={()=>onNavigate('customer-detail',c.name)}><td style={{fontWeight:500}}>{c.name}</td><td>{c.group?<span className="tag" style={{background:'var(--primary-bg)',color:'var(--primary)'}}>{c.group}</span>:'—'}</td><td>{c.orders.length}</td><td>{latest?fmtDate(latest.date):'—'}</td><td><span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span></td><td style={{textAlign:'right'}}><Icon name="chevron" size={16}/></td></tr>;})}
+    <div className="card"><div className="card-header"><h3>All Customers</h3></div><table><thead><tr><SortTh label="Customer" colKey="name" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Group" colKey="group" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Orders" colKey="orders" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Latest" colKey="latest" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Status" colKey="status" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><th></th></tr></thead><tbody>
+      {sortedCustomers.map(c=>{const st=c.latest?getStatus(c.latest.status):getStatus('pending');return <tr key={c.name} style={{cursor:'pointer'}} onClick={()=>onNavigate('customer-detail',c.name)}><td style={{fontWeight:500}}>{c.name}</td><td>{c.group?<span className="tag" style={{background:'var(--primary-bg)',color:'var(--primary)'}}>{c.group}</span>:'—'}</td><td>{c.orders.length}</td><td>{c.latest?fmtDate(c.latest.date):'—'}</td><td><span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span></td><td style={{textAlign:'right'}}><Icon name="chevron" size={16}/></td></tr>;})}
     </tbody></table></div>
   </div>;
 }
@@ -741,8 +951,17 @@ function DeliveriesScreen({onNavigate}) {
   const [showNew,setShowNew] = useState(false);
   const [showTicket,setShowTicket] = useState(null);
   const [tab,setTab] = useState('deliveries');
+  const {sortKey:dSK,sortDir:dSD,toggleSort:dToggle,sortFn:dSort} = useSort(null);
   const activePumps=data.deliveries.filter(d=>d.pumpsOut>0&&!d.pumpsReturned);
   const activeTotes=data.deliveries.filter(d=>d.totes>0&&!d.totesReturned);
+
+  const sortedDeliveries=useMemo(()=>{
+    if(!dSK) return [...data.deliveries].sort((a,b)=>new Date(b.date)-new Date(a.date));
+    return dSort(data.deliveries,(d,k)=>{switch(k){case'customer':return d.customer;case'date':return d.date||'';case'products':return Object.keys(d.products||{}).filter(x=>(d.products||{})[x]>0).length;case'pumps':return d.pumpsOut||0;case'totes':return d.totes||0;case'photos':return (d.attachments||[]).length;default:return d.customer;}});
+  },[data.deliveries,dSK,dSD]);
+  const sortedPumps=useMemo(()=>dSort(activePumps,(d,k)=>{switch(k){case'customer':return d.customer;case'date':return d.date||'';case'pumps':return d.pumpsOut||0;case'returnDate':return d.pumpsReturnDate||'';default:return d.customer;}}),[activePumps,dSK,dSD]);
+  const sortedTotes=useMemo(()=>dSort(activeTotes,(d,k)=>{switch(k){case'customer':return d.customer;case'date':return d.date||'';case'totes':return d.totes||0;default:return d.customer;}}),[activeTotes,dSK,dSD]);
+  const sortedTickets=useMemo(()=>dSort(data.deliveryTickets||[],(t,k)=>{switch(k){case'customer':return t.customer;case'date':return t.date||'';case'savedAt':return t.savedAt||'';case'products':return t.productCount||0;default:return t.customer;}}),[data.deliveryTickets,dSK,dSD]);
 
   return <div className="fade-in">
     <div className="page-header" style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
@@ -755,8 +974,8 @@ function DeliveriesScreen({onNavigate}) {
       <div className={`tab ${tab==='totes'?'active':''}`} onClick={()=>setTab('totes')}>Totes Out ({activeTotes.length})</div>
       <div className={`tab ${tab==='tickets'?'active':''}`} onClick={()=>setTab('tickets')}>Saved Tickets ({data.deliveryTickets?.length||0})</div>
     </div>
-    {tab==='deliveries'&&<div className="card" style={{padding:0}}><table><thead><tr><th>Customer</th><th>Date</th><th>Products</th><th>Pumps</th><th>Totes</th><th>Photos</th><th></th></tr></thead><tbody>
-      {data.deliveries.length===0?<tr><td colSpan="7" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No deliveries recorded yet</td></tr>:data.deliveries.sort((a,b)=>new Date(b.date)-new Date(a.date)).map(d=><tr key={d.id}>
+    {tab==='deliveries'&&<div className="card" style={{padding:0}}><table><thead><tr><SortTh label="Customer" colKey="customer" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Date" colKey="date" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Products" colKey="products" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Pumps" colKey="pumps" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Totes" colKey="totes" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Photos" colKey="photos" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><th></th></tr></thead><tbody>
+      {sortedDeliveries.length===0?<tr><td colSpan="7" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No deliveries recorded yet</td></tr>:sortedDeliveries.map(d=><tr key={d.id}>
         <td style={{fontWeight:500}}>{d.customer}</td><td>{fmtDate(d.date)}</td>
         <td>{Object.entries(d.products||{}).filter(([,v])=>v>0).slice(0,3).map(([pid,qty])=>{const p=ALL_PRODUCTS.find(x=>x.id===pid);return <span key={pid} className="tag" style={{marginRight:4}}>{p?.name?.split('-')[0]?.trim()}: {fmt(qty)}</span>;})}</td>
         <td>{d.pumpsOut||'—'}</td><td>{d.totes||'—'}{d.totesReturned?' (in)':''}</td>
@@ -764,16 +983,16 @@ function DeliveriesScreen({onNavigate}) {
         <td><button className="btn btn-sm btn-secondary" onClick={()=>setShowTicket(d)}><Icon name="printer" size={14}/>Ticket</button></td>
       </tr>)}
     </tbody></table></div>}
-    {tab==='pumps'&&<div className="card" style={{padding:0}}><table><thead><tr><th>Customer</th><th>Delivery Date</th><th>Pumps Out</th><th>Return Date</th><th></th></tr></thead><tbody>
-      {activePumps.length===0?<tr><td colSpan="5" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No pumps currently out</td></tr>:activePumps.map(d=><tr key={d.id}><td style={{fontWeight:500}}>{d.customer}</td><td>{fmtDate(d.date)}</td><td style={{fontWeight:600}}>{d.pumpsOut}</td><td>{d.pumpsReturnDate?fmtDate(d.pumpsReturnDate):'Not set'}</td>
+    {tab==='pumps'&&<div className="card" style={{padding:0}}><table><thead><tr><SortTh label="Customer" colKey="customer" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Delivery Date" colKey="date" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Pumps Out" colKey="pumps" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Return Date" colKey="returnDate" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><th></th></tr></thead><tbody>
+      {sortedPumps.length===0?<tr><td colSpan="5" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No pumps currently out</td></tr>:sortedPumps.map(d=><tr key={d.id}><td style={{fontWeight:500}}>{d.customer}</td><td>{fmtDate(d.date)}</td><td style={{fontWeight:600}}>{d.pumpsOut}</td><td>{d.pumpsReturnDate?fmtDate(d.pumpsReturnDate):'Not set'}</td>
         <td><button className="btn btn-sm btn-success" onClick={()=>{updateDelivery(d.id,{pumpsReturned:true,pumpsReturnedDate:today()});showToast('Pumps returned');}}><Icon name="check" size={14}/>Return</button></td></tr>)}
     </tbody></table></div>}
-    {tab==='totes'&&<div className="card" style={{padding:0}}><table><thead><tr><th>Customer</th><th>Delivery Date</th><th>Totes</th><th>Status</th><th></th></tr></thead><tbody>
-      {activeTotes.length===0?<tr><td colSpan="5" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No totes currently out</td></tr>:activeTotes.map(d=><tr key={d.id}><td style={{fontWeight:500}}>{d.customer}</td><td>{fmtDate(d.date)}</td><td style={{fontWeight:600}}>{d.totes}</td><td><span className="status-badge status-partial-deliver"><span className="status-dot dot-partial-deliver"></span>Out</span></td>
+    {tab==='totes'&&<div className="card" style={{padding:0}}><table><thead><tr><SortTh label="Customer" colKey="customer" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Delivery Date" colKey="date" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Totes" colKey="totes" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><th>Status</th><th></th></tr></thead><tbody>
+      {sortedTotes.length===0?<tr><td colSpan="5" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No totes currently out</td></tr>:sortedTotes.map(d=><tr key={d.id}><td style={{fontWeight:500}}>{d.customer}</td><td>{fmtDate(d.date)}</td><td style={{fontWeight:600}}>{d.totes}</td><td><span className="status-badge status-partial-deliver"><span className="status-dot dot-partial-deliver"></span>Out</span></td>
         <td><button className="btn btn-sm btn-success" onClick={()=>{updateDelivery(d.id,{totesReturned:true,totesReturnedDate:today()});showToast('Totes checked in');}}><Icon name="check" size={14}/>Check In</button></td></tr>)}
     </tbody></table></div>}
-    {tab==='tickets'&&<div className="card" style={{padding:0}}><table><thead><tr><th>Customer</th><th>Delivery Date</th><th>Saved On</th><th>Products</th><th></th></tr></thead><tbody>
-      {(data.deliveryTickets||[]).length===0?<tr><td colSpan="5" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No saved tickets yet. Tickets are saved when you generate a delivery.</td></tr>:data.deliveryTickets.map(t=><tr key={t.id}><td style={{fontWeight:500}}>{t.customer}</td><td>{fmtDate(t.date)}</td><td>{fmtDate(t.savedAt)}</td><td>{t.productCount} products</td>
+    {tab==='tickets'&&<div className="card" style={{padding:0}}><table><thead><tr><SortTh label="Customer" colKey="customer" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Delivery Date" colKey="date" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Saved On" colKey="savedAt" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Products" colKey="products" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><th></th></tr></thead><tbody>
+      {sortedTickets.length===0?<tr><td colSpan="5" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No saved tickets yet. Tickets are saved when you generate a delivery.</td></tr>:sortedTickets.map(t=><tr key={t.id}><td style={{fontWeight:500}}>{t.customer}</td><td>{fmtDate(t.date)}</td><td>{fmtDate(t.savedAt)}</td><td>{t.productCount} products</td>
         <td><button className="btn btn-sm btn-secondary" onClick={()=>setShowTicket(t)}><Icon name="printer" size={14}/>View</button></td></tr>)}
     </tbody></table></div>}
     {showNew&&<NewDeliveryModal onClose={()=>setShowNew(false)}/>}
@@ -996,11 +1215,12 @@ function SettingsScreen() {
   const [fyStartDay,setFyStartDay]=useState(fy.fiscalYearStart?.day||1);
   const [fyEndMonth,setFyEndMonth]=useState(fy.fiscalYearEnd?.month||12);
   const [fyEndDay,setFyEndDay]=useState(fy.fiscalYearEnd?.day||31);
+  const [fyLabelMode,setFyLabelMode]=useState(fy.fiscalYearLabel||'end');
   const [sbUrl,setSbUrl]=useState(fy.supabase?.url||'');
   const [sbKey,setSbKey]=useState(fy.supabase?.anonKey||'');
 
   const handleImport=e=>{const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=ev=>importData(ev.target.result);r.readAsText(file);};
-  const saveFiscalYear=()=>{updateSettings({fiscalYearStart:{month:parseInt(fyStartMonth),day:parseInt(fyStartDay)},fiscalYearEnd:{month:parseInt(fyEndMonth),day:parseInt(fyEndDay)}});showToast('Fiscal year updated');};
+  const saveFiscalYear=()=>{updateSettings({fiscalYearStart:{month:parseInt(fyStartMonth),day:parseInt(fyStartDay)},fiscalYearEnd:{month:parseInt(fyEndMonth),day:parseInt(fyEndDay)},fiscalYearLabel:fyLabelMode});showToast('Fiscal year updated');};
   const toggleArchive=year=>{const archived=archivedYears.includes(year)?archivedYears.filter(y=>y!==year):[...archivedYears,year];updateSettings({archivedYears:archived});showToast(archivedYears.includes(year)?'Year unarchived':'Year archived');};
   const saveSupabase=()=>{updateSettings({supabase:{url:sbUrl,anonKey:sbKey,enabled:!!(sbUrl&&sbKey)}});showToast('Supabase settings saved');};
 
@@ -1021,13 +1241,21 @@ function SettingsScreen() {
     {/* Fiscal Year */}
     <div className="card"><div className="card-header"><h3>Fiscal Year Configuration</h3></div>
       <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:12}}>Define custom start/end dates for your order year. Orders are categorized into fiscal years based on their order date.</p>
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr auto',gap:12,alignItems:'end'}}>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr 1fr',gap:12,alignItems:'end'}}>
         <div className="form-group"><label>Start Month</label><select value={fyStartMonth} onChange={e=>setFyStartMonth(e.target.value)}>{months.map((m,i)=><option key={i} value={i+1}>{m}</option>)}</select></div>
         <div className="form-group"><label>Start Day</label><input type="number" min="1" max="31" value={fyStartDay} onChange={e=>setFyStartDay(e.target.value)}/></div>
         <div className="form-group"><label>End Month</label><select value={fyEndMonth} onChange={e=>setFyEndMonth(e.target.value)}>{months.map((m,i)=><option key={i} value={i+1}>{m}</option>)}</select></div>
         <div className="form-group"><label>End Day</label><input type="number" min="1" max="31" value={fyEndDay} onChange={e=>setFyEndDay(e.target.value)}/></div>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr auto',gap:12,alignItems:'end',marginTop:12}}>
+        <div className="form-group"><label>Year Label</label><select value={fyLabelMode} onChange={e=>setFyLabelMode(e.target.value)}>
+          <option value="end">End Year (e.g. Nov 2025–Oct 2026 → "2026")</option>
+          <option value="start">Start Year (e.g. Nov 2025–Oct 2026 → "2025")</option>
+          <option value="range">Range (e.g. Nov 2025–Oct 2026 → "2025-2026")</option>
+        </select></div>
         <button className="btn btn-primary" onClick={saveFiscalYear}>Save</button>
       </div>
+      {fyLabelMode!=='range'&&parseInt(fyStartMonth)!==1&&<p style={{fontSize:12,color:'var(--primary)',marginTop:8,fontStyle:'italic'}}>Preview: A fiscal year starting {months[parseInt(fyStartMonth)-1]} {fyStartDay}, 2025 through {months[parseInt(fyEndMonth)-1]} {fyEndDay}, 2026 will be labeled "<strong>{fyLabelMode==='end'?'2026':'2025'}</strong>"</p>}
     </div>
 
     {/* Year Archive */}
@@ -1107,7 +1335,7 @@ function App() {
       </div>
       <div className="year-select"><span>Year:</span><select value={activeYear} onChange={e=>setActiveYear(e.target.value)}>{visibleYears.map(y=><option key={y} value={y}>{y}</option>)}</select></div>
       <div style={{padding:'8px 12px',borderTop:'1px solid #1e293b',fontSize:11,color:'#475569',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
-        <span>v3.0</span>
+        <span>v{APP_VERSION}</span>
         <span className={`sb-status ${sbConnected?'sb-connected':'sb-disconnected'}`} style={{padding:'2px 8px',fontSize:10}}>
           <span className={`status-dot ${sbConnected?'dot-paid':'dot-pending'}`}></span>{sbConnected?'Synced':'Local'}
         </span>
