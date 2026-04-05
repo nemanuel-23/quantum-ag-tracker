@@ -120,6 +120,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--primary-light);box-sh
 @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 .toast{position:fixed;bottom:24px;right:24px;background:#0f172a;color:#fff;padding:12px 20px;border-radius:8px;font-size:13px;z-index:200;animation:slideUp .3s ease-out}
 @keyframes slideUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
@@ -128,7 +129,107 @@ input:focus,select:focus,textarea:focus{border-color:var(--primary-light);box-sh
 const {useState,useEffect,useCallback,useMemo,createContext,useContext,useRef} = React;
 
 // ── APP VERSION ──
-const APP_VERSION = '3.2';
+const APP_VERSION = '3.4';
+
+// ── SUPABASE AUTH CONFIG ──
+const SB_URL = 'https://ctrwdnbmhrfweifgpxmb.supabase.co';
+const SB_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN0cndkbmJtaHJmd2VpZmdweG1iIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNDE5NjYsImV4cCI6MjA5MDgxNzk2Nn0._L01LXwfLmjj1hPIM3gKTr7OcN9hIvpncYn2tltmejg';
+const sbClient = window.supabase ? window.supabase.createClient(SB_URL, SB_ANON_KEY) : null;
+
+// ── LOGIN SCREEN ──
+function LoginScreen({onLogin}) {
+  const [email,setEmail] = useState('');
+  const [sending,setSending] = useState(false);
+  const [sent,setSent] = useState(false);
+  const [error,setError] = useState(null);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    if(!email.trim()){setError('Please enter your email');return;}
+    if(!sbClient){setError('Supabase not available');return;}
+    setSending(true);setError(null);
+    const {error:authErr} = await sbClient.auth.signInWithOtp({email:email.trim(), options:{emailRedirectTo:'https://orders.quantumag.farm'}});
+    setSending(false);
+    if(authErr){setError(authErr.message);}
+    else{setSent(true);}
+  };
+
+  return <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%)',padding:20}}>
+    <div style={{background:'#fff',borderRadius:16,padding:40,width:'100%',maxWidth:400,boxShadow:'0 25px 50px rgba(0,0,0,.25)'}}>
+      <div style={{textAlign:'center',marginBottom:32}}>
+        <div style={{width:56,height:56,background:'var(--primary)',borderRadius:12,display:'inline-flex',alignItems:'center',justifyContent:'center',marginBottom:16}}>
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        </div>
+        <h1 style={{fontSize:24,fontWeight:700,color:'var(--text)',margin:0}}>Quantum Ag</h1>
+        <p style={{fontSize:14,color:'var(--text-secondary)',marginTop:4}}>Inventory & Delivery Tracker</p>
+      </div>
+      {!sent ? <form onSubmit={handleLogin}>
+        <div className="form-group">
+          <label style={{fontSize:13,fontWeight:500}}>Email Address</label>
+          <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" autoFocus style={{padding:'10px 14px',fontSize:14}}/>
+        </div>
+        {error && <p style={{color:'var(--danger)',fontSize:13,marginBottom:12}}>{error}</p>}
+        <button type="submit" className="btn btn-primary" disabled={sending} style={{width:'100%',padding:'10px 0',fontSize:14,justifyContent:'center',marginTop:4}}>
+          {sending ? 'Sending...' : 'Send Login Link'}
+        </button>
+        <p style={{fontSize:12,color:'var(--text-secondary)',textAlign:'center',marginTop:16}}>
+          A magic link will be sent to your email.
+        </p>
+      </form>
+      : <div style={{textAlign:'center'}}>
+        <div style={{width:48,height:48,background:'var(--success-bg)',borderRadius:'50%',display:'inline-flex',alignItems:'center',justifyContent:'center',marginBottom:16}}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="2"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <h3 style={{fontSize:18,fontWeight:600,marginBottom:8}}>Check your email</h3>
+        <p style={{fontSize:14,color:'var(--text-secondary)',marginBottom:20}}>We sent a login link to <strong>{email}</strong>. Click the link to sign in.</p>
+        <button className="btn btn-secondary" onClick={()=>{setSent(false);setError(null);}} style={{width:'100%',justifyContent:'center'}}>Use a different email</button>
+      </div>}
+      <p style={{fontSize:11,color:'#94a3b8',textAlign:'center',marginTop:24}}>v{APP_VERSION}</p>
+    </div>
+  </div>;
+}
+
+// ── AUTH GATE ──
+function AuthGate({children}) {
+  const [user,setUser] = useState(null);
+  const [loading,setLoading] = useState(true);
+
+  useEffect(()=>{
+    if(!sbClient){setLoading(false);return;}
+    // Check current session
+    sbClient.auth.getUser().then(({data})=>{
+      setUser(data?.user||null);
+      setLoading(false);
+    });
+    // Listen for auth changes (magic link redirect)
+    const {data:{subscription}} = sbClient.auth.onAuthStateChange((event,session)=>{
+      setUser(session?.user||null);
+      if(event==='SIGNED_IN') setLoading(false);
+    });
+    return ()=>subscription.unsubscribe();
+  },[]);
+
+  const handleLogout = async () => {
+    await sbClient.auth.signOut();
+    setUser(null);
+  };
+
+  if(loading) return <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%)'}}>
+    <div style={{textAlign:'center',color:'#fff'}}>
+      <div style={{width:40,height:40,border:'3px solid rgba(255,255,255,.2)',borderTopColor:'#fff',borderRadius:'50%',animation:'spin .8s linear infinite',margin:'0 auto 16px'}}></div>
+      <p style={{fontSize:14,opacity:.8}}>Loading...</p>
+    </div>
+  </div>;
+
+  if(!user) return <LoginScreen/>;
+
+  return <AuthContext.Provider value={{user,logout:handleLogout}}>
+    {children}
+  </AuthContext.Provider>;
+}
+
+const AuthContext = createContext();
+function useAuth(){return useContext(AuthContext);}
 
 // ── MASTER DATA ──
 const ALL_PRODUCTS = [
@@ -316,14 +417,8 @@ const Icon = ({name,...p}) => {
 };
 
 // ── SUPABASE LAYER ──
-let supabaseClient = null;
-function initSupabase(url, key) {
-  if(url && key && window.supabase) {
-    supabaseClient = window.supabase.createClient(url, key);
-    return supabaseClient;
-  }
-  return null;
-}
+// Supabase data sync uses the same hardcoded client
+const supabaseClient = sbClient;
 
 // ── CONTEXT ──
 const AppContext = createContext();
@@ -345,23 +440,18 @@ function AppProvider({children}) {
 
   useEffect(()=>{localStorage.setItem('quantumag_data',JSON.stringify(data));localStorage.setItem('quantumag_version',APP_VERSION);},[data]);
 
-  // Supabase sync
+  // Supabase sync — always uses hardcoded credentials
   useEffect(()=>{
-    const sb = data.settings?.supabase;
-    if(sb?.enabled&&sb?.url&&sb?.anonKey){
-      const client = initSupabase(sb.url,sb.anonKey);
-      if(client){
-        client.from('app_data').select('*').limit(1).then(({data:rows,error})=>{
-          if(!error){setSbConnected(true);showToast('Connected to Supabase');}
-          else{setSbConnected(false);}
-        });
-        const channel = client.channel('realtime_sync').on('postgres_changes',{event:'*',schema:'public',table:'app_data'},(payload)=>{
-          if(payload.new?.data){setData(d=>({...d,...JSON.parse(payload.new.data),settings:d.settings}));}
-        }).subscribe();
-        return ()=>{client.removeChannel(channel);};
-      }
-    } else {setSbConnected(false);}
-  },[data.settings?.supabase?.enabled,data.settings?.supabase?.url]);
+    if(!supabaseClient) {setSbConnected(false);return;}
+    supabaseClient.from('app_data').select('*').limit(1).then(({data:rows,error})=>{
+      if(!error){setSbConnected(true);showToast('Connected to Supabase');}
+      else{setSbConnected(false);}
+    });
+    const channel = supabaseClient.channel('realtime_sync').on('postgres_changes',{event:'*',schema:'public',table:'app_data'},(payload)=>{
+      if(payload.new?.data){setData(d=>({...d,...JSON.parse(payload.new.data),settings:d.settings}));}
+    }).subscribe();
+    return ()=>{supabaseClient.removeChannel(channel);};
+  },[]);
 
   const syncToSupabase = useCallback((newData)=>{
     if(sbConnected&&supabaseClient){
@@ -1320,6 +1410,7 @@ function GroupModal({groupIndex,onClose}) {
 // ══════════════════
 function App() {
   const {toast,activeYear,setActiveYear,visibleYears,sbConnected} = useApp();
+  const {user,logout} = useAuth();
   const [page,setPage] = useState('dashboard');
   const [pageArg,setPageArg] = useState(null);
   const [sidebarOpen,setSidebarOpen] = useState(false);
@@ -1334,6 +1425,10 @@ function App() {
         {navItems.map(n=><div key={n.id} className={`nav-item ${page===n.id?'active':''}`} onClick={()=>navigate(n.id)}><Icon name={n.icon}/>{n.label}</div>)}
       </div>
       <div className="year-select"><span>Year:</span><select value={activeYear} onChange={e=>setActiveYear(e.target.value)}>{visibleYears.map(y=><option key={y} value={y}>{y}</option>)}</select></div>
+      {user && <div style={{padding:'8px 12px',borderTop:'1px solid #1e293b'}}>
+        <div style={{fontSize:11,color:'#94a3b8',marginBottom:6,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={user.email}>{user.email}</div>
+        <button onClick={logout} style={{background:'none',border:'1px solid #334155',borderRadius:4,color:'#94a3b8',fontSize:11,padding:'4px 10px',cursor:'pointer',width:'100%',transition:'all .15s'}} onMouseEnter={e=>{e.target.style.background='#1e293b';e.target.style.color='#e2e8f0'}} onMouseLeave={e=>{e.target.style.background='none';e.target.style.color='#94a3b8'}}>Sign Out</button>
+      </div>}
       <div style={{padding:'8px 12px',borderTop:'1px solid #1e293b',fontSize:11,color:'#475569',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
         <span>v{APP_VERSION}</span>
         <span className={`sb-status ${sbConnected?'sb-connected':'sb-disconnected'}`} style={{padding:'2px 8px',fontSize:10}}>
@@ -1346,7 +1441,7 @@ function App() {
   </>;
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<AppProvider><App/></AppProvider>);
+ReactDOM.createRoot(document.getElementById('root')).render(<AuthGate><AppProvider><App/></AppProvider></AuthGate>);
 </script>
 </body>
 </html>
