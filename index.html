@@ -129,9 +129,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--primary-light);box-sh
 const {useState,useEffect,useCallback,useMemo,createContext,useContext,useRef} = React;
 
 // ── APP VERSION ──
-const APP_VERSION = '3.8';
+const APP_VERSION = '3.9';
 
 // ── SUPABASE AUTH CONFIG ──
+const SB_ROW_ID = '277449c7-b587-4e4d-bca0-835cbce1771e';
 const SB_URL = 'https://ctrwdnbmhrfweifgpxmb.supabase.co';
 const SB_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN0cndkbmJtaHJmd2VpZmdweG1iIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUyNDE5NjYsImV4cCI6MjA5MDgxNzk2Nn0._L01LXwfLmjj1hPIM3gKTr7OcN9hIvpncYn2tltmejg';
 const sbClient = window.supabase ? window.supabase.createClient(SB_URL, SB_ANON_KEY) : null;
@@ -453,7 +454,7 @@ function AppProvider({children}) {
     if(!supabaseClient) return;
     if(!hasFetched.current) return;
     if(isRemoteUpdate.current){isRemoteUpdate.current=false;return;}
-    supabaseClient.from('app_data').upsert({id:1,data:JSON.stringify(data),updated_at:new Date().toISOString()})
+    supabaseClient.from('app_data').upsert({id:SB_ROW_ID,data:JSON.stringify(data),updated_at:new Date().toISOString()})
       .then(({error})=>{if(error)console.warn('Supabase push error:',error.message);});
   },[data]);
 
@@ -462,7 +463,7 @@ function AppProvider({children}) {
     if(!supabaseClient) {setSbConnected(false);return;}
     setSbConnected(true);
     // Fetch latest data from Supabase on startup
-    supabaseClient.from('app_data').select('*').eq('id',1).limit(1).then(({data:rows,error})=>{
+    supabaseClient.from('app_data').select('*').eq('id',SB_ROW_ID).limit(1).then(({data:rows,error})=>{
       if(!error && rows && rows.length>0 && rows[0].data){
         const remote=JSON.parse(rows[0].data);
         isRemoteUpdate.current=true;
