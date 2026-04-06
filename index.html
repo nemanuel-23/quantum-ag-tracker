@@ -129,7 +129,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--primary-light);box-sh
 const {useState,useEffect,useCallback,useMemo,createContext,useContext,useRef} = React;
 
 // ── APP VERSION ──
-const APP_VERSION = '3.4';
+const APP_VERSION = '3.5';
 
 // ── SUPABASE AUTH CONFIG ──
 const SB_URL = 'https://ctrwdnbmhrfweifgpxmb.supabase.co';
@@ -443,20 +443,35 @@ function AppProvider({children}) {
   // Supabase sync — always uses hardcoded credentials
   useEffect(()=>{
     if(!supabaseClient) {setSbConnected(false);return;}
-    supabaseClient.from('app_data').select('*').limit(1).then(({data:rows,error})=>{
-      if(!error){setSbConnected(true);showToast('Connected to Supabase');}
-      else{setSbConnected(false);}
+    // Fetch latest data from Supabase on startup
+    supabaseClient.from('app_data').select('*').eq('id',1).limit(1).then(({data:rows,error})=>{
+      if(!error){
+        setSbConnected(true);showToast('Connected to Supabase');
+        if(rows&&rows.length>0&&rows[0].data){
+          const remote=JSON.parse(rows[0].data);
+          setData(d=>{
+            // Use remote data, merging with local defaults for any missing fields
+            const merged={...d,...remote};
+            if(remote.settings) merged.settings={...d.settings,...remote.settings};
+            if(!merged.deliveryTickets) merged.deliveryTickets=[];
+            return merged;
+          });
+        }
+      } else{setSbConnected(false);}
     });
+    // Listen for realtime changes from other devices
     const channel = supabaseClient.channel('realtime_sync').on('postgres_changes',{event:'*',schema:'public',table:'app_data'},(payload)=>{
-      if(payload.new?.data){setData(d=>({...d,...JSON.parse(payload.new.data),settings:d.settings}));}
+      if(payload.new?.data){
+        const remote=JSON.parse(payload.new.data);
+        setData(d=>{const merged={...d,...remote};if(remote.settings) merged.settings={...d.settings,...remote.settings};return merged;});
+      }
     }).subscribe();
     return ()=>{supabaseClient.removeChannel(channel);};
   },[]);
 
   const syncToSupabase = useCallback((newData)=>{
     if(sbConnected&&supabaseClient){
-      const {settings,...syncData} = newData;
-      supabaseClient.from('app_data').upsert({id:1,data:JSON.stringify(syncData),updated_at:new Date().toISOString()});
+      supabaseClient.from('app_data').upsert({id:1,data:JSON.stringify(newData),updated_at:new Date().toISOString()});
     }
   },[sbConnected]);
 
@@ -476,7 +491,7 @@ function AppProvider({children}) {
   const addGroup=g=>{updateData(d=>({...d,customerGroups:[...d.customerGroups,g]}));};
   const updateGroup=(i,g)=>{updateData(d=>({...d,customerGroups:d.customerGroups.map((x,j)=>j===i?g:x)}));};
   const deleteGroup=i=>{updateData(d=>({...d,customerGroups:d.customerGroups.filter((_,j)=>j!==i)}));};
-  const updateSettings=s=>{setData(d=>({...d,settings:{...d.settings,...s}}));};
+  const updateSettings=s=>{updateData(d=>({...d,settings:{...d.settings,...s}}));};
   const saveDeliveryTicket=t=>{updateData(d=>({...d,deliveryTickets:[...d.deliveryTickets,{...t,id:uid(),savedAt:today()}]}));};
 
   const fyStart = data.settings?.fiscalYearStart||{month:1,day:1};
