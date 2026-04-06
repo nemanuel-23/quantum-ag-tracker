@@ -1326,7 +1326,7 @@ function NewDeliveryModal({onClose}) {
         <button onClick={()=>{setMode('group');setSelectedOrder('');setProducts({});}} style={{padding:'8px 20px',fontSize:13,fontWeight:500,cursor:'pointer',border:'none',borderLeft:'1px solid var(--border)',background:mode==='group'?'var(--primary)':'#fff',color:mode==='group'?'#fff':'var(--text)'}}>Group Delivery</button>
       </div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-        {mode==='individual'?<div className="form-group"><label>Select Order</label><select value={selectedOrder} onChange={e=>setSelectedOrder(e.target.value)}><option value="">-- Select an order --</option>{pendingOrders.map(o=><option key={o.id} value={o.id}>{o.customer} — {fmtDate(o.date)}</option>)}</select></div>
+        {mode==='individual'?<div className="form-group"><label>Select Order</label><select value={selectedOrder} onChange={e=>setSelectedOrder(e.target.value)}><option value="">-- Select an order --</option>{deliverableOrders.map(o=><option key={o.id} value={o.id}>{o.customer} — {fmtDate(o.date)}</option>)}</select></div>
         :<div className="form-group"><label>Select Group</label><select value={selectedGroup} onChange={e=>setSelectedGroup(e.target.value)}><option value="">-- Select a group --</option>{groupsWithPendingOrders.map(g=><option key={g.name} value={g.name}>{g.name} ({g.members.length} members)</option>)}</select></div>}
         <div className="form-group"><label>Delivery Date</label><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></div>
       </div>
