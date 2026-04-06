@@ -435,7 +435,7 @@ function AppProvider({children}) {
     return parsed;
   });
   const [toast,setToast] = useState(null);
-  const [sbConnected,setSbConnected] = useState(false);
+  const [sbConnected,setSbConnected] = useState(!!supabaseClient);
   const [activeYear,setActiveYear] = useState(()=>getFiscalYear(today(),data.settings?.fiscalYearStart,data.settings?.fiscalYearLabel));
 
   const showToast = msg =>{setToast(msg);setTimeout(()=>setToast(null),3000);};
@@ -445,21 +445,19 @@ function AppProvider({children}) {
   // Supabase sync — always uses hardcoded credentials
   useEffect(()=>{
     if(!supabaseClient) {setSbConnected(false);return;}
+    setSbConnected(true);
     // Fetch latest data from Supabase on startup
     supabaseClient.from('app_data').select('*').eq('id',1).limit(1).then(({data:rows,error})=>{
-      if(!error){
-        setSbConnected(true);showToast('Connected to Supabase');
-        if(rows&&rows.length>0&&rows[0].data){
-          const remote=JSON.parse(rows[0].data);
-          setData(d=>{
-            const merged={...d,...remote};
-            // Always enforce hardcoded supabase settings
-            merged.settings={...d.settings,...(remote.settings||{}),supabase:{url:SB_URL,anonKey:SB_ANON_KEY,enabled:true}};
-            if(!merged.deliveryTickets) merged.deliveryTickets=[];
-            return merged;
-          });
-        }
-      } else{setSbConnected(false);}
+      if(!error && rows && rows.length>0 && rows[0].data){
+        const remote=JSON.parse(rows[0].data);
+        setData(d=>{
+          const merged={...d,...remote};
+          merged.settings={...d.settings,...(remote.settings||{}),supabase:{url:SB_URL,anonKey:SB_ANON_KEY,enabled:true}};
+          if(!merged.deliveryTickets) merged.deliveryTickets=[];
+          return merged;
+        });
+      }
+      if(error) console.warn('Supabase data fetch:',error.message);
     });
     // Listen for realtime changes from other devices
     const channel = supabaseClient.channel('realtime_sync').on('postgres_changes',{event:'*',schema:'public',table:'app_data'},(payload)=>{
