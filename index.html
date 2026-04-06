@@ -438,6 +438,8 @@ function AppProvider({children}) {
   const [sbConnected,setSbConnected] = useState(false);
   const [activeYear,setActiveYear] = useState(()=>getFiscalYear(today(),data.settings?.fiscalYearStart,data.settings?.fiscalYearLabel));
 
+  const showToast = msg =>{setToast(msg);setTimeout(()=>setToast(null),3000);};
+
   useEffect(()=>{localStorage.setItem('quantumag_data',JSON.stringify(data));localStorage.setItem('quantumag_version',APP_VERSION);},[data]);
 
   // Supabase sync — always uses hardcoded credentials
@@ -450,9 +452,9 @@ function AppProvider({children}) {
         if(rows&&rows.length>0&&rows[0].data){
           const remote=JSON.parse(rows[0].data);
           setData(d=>{
-            // Use remote data, merging with local defaults for any missing fields
             const merged={...d,...remote};
-            if(remote.settings) merged.settings={...d.settings,...remote.settings};
+            // Always enforce hardcoded supabase settings
+            merged.settings={...d.settings,...(remote.settings||{}),supabase:{url:SB_URL,anonKey:SB_ANON_KEY,enabled:true}};
             if(!merged.deliveryTickets) merged.deliveryTickets=[];
             return merged;
           });
@@ -463,7 +465,11 @@ function AppProvider({children}) {
     const channel = supabaseClient.channel('realtime_sync').on('postgres_changes',{event:'*',schema:'public',table:'app_data'},(payload)=>{
       if(payload.new?.data){
         const remote=JSON.parse(payload.new.data);
-        setData(d=>{const merged={...d,...remote};if(remote.settings) merged.settings={...d.settings,...remote.settings};return merged;});
+        setData(d=>{
+          const merged={...d,...remote};
+          merged.settings={...d.settings,...(remote.settings||{}),supabase:{url:SB_URL,anonKey:SB_ANON_KEY,enabled:true}};
+          return merged;
+        });
       }
     }).subscribe();
     return ()=>{supabaseClient.removeChannel(channel);};
@@ -474,8 +480,6 @@ function AppProvider({children}) {
       supabaseClient.from('app_data').upsert({id:1,data:JSON.stringify(newData),updated_at:new Date().toISOString()});
     }
   },[sbConnected]);
-
-  const showToast = msg =>{setToast(msg);setTimeout(()=>setToast(null),3000);};
 
   const updateData = (updater)=>{
     setData(d=>{const n=typeof updater==='function'?updater(d):updater;syncToSupabase(n);return n;});
