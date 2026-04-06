@@ -129,7 +129,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--primary-light);box-sh
 const {useState,useEffect,useCallback,useMemo,createContext,useContext,useRef} = React;
 
 // ── APP VERSION ──
-const APP_VERSION = '3.9';
+const APP_VERSION = '4.0';
 
 // ── SUPABASE AUTH CONFIG ──
 const SB_ROW_ID = '277449c7-b587-4e4d-bca0-835cbce1771e';
@@ -454,7 +454,7 @@ function AppProvider({children}) {
     if(!supabaseClient) return;
     if(!hasFetched.current) return;
     if(isRemoteUpdate.current){isRemoteUpdate.current=false;return;}
-    supabaseClient.from('app_data').upsert({id:SB_ROW_ID,data:JSON.stringify(data),updated_at:new Date().toISOString()})
+    supabaseClient.from('app_data').upsert({id:SB_ROW_ID,data:data,updated_at:new Date().toISOString()})
       .then(({error})=>{if(error)console.warn('Supabase push error:',error.message);});
   },[data]);
 
@@ -465,7 +465,7 @@ function AppProvider({children}) {
     // Fetch latest data from Supabase on startup
     supabaseClient.from('app_data').select('*').eq('id',SB_ROW_ID).limit(1).then(({data:rows,error})=>{
       if(!error && rows && rows.length>0 && rows[0].data){
-        const remote=JSON.parse(rows[0].data);
+        const remote = typeof rows[0].data === 'string' ? JSON.parse(rows[0].data) : rows[0].data;
         isRemoteUpdate.current=true;
         setData(d=>{
           const merged={...d,...remote};
@@ -481,7 +481,7 @@ function AppProvider({children}) {
     // Listen for realtime changes from other devices
     const channel = supabaseClient.channel('realtime_sync').on('postgres_changes',{event:'*',schema:'public',table:'app_data'},(payload)=>{
       if(payload.new?.data){
-        const remote=JSON.parse(payload.new.data);
+        const remote = typeof payload.new.data === 'string' ? JSON.parse(payload.new.data) : payload.new.data;
         isRemoteUpdate.current=true;
         setData(d=>{
           const merged={...d,...remote};
