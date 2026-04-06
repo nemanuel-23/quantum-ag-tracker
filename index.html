@@ -129,7 +129,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--primary-light);box-sh
 const {useState,useEffect,useCallback,useMemo,createContext,useContext,useRef} = React;
 
 // ── APP VERSION ──
-const APP_VERSION = '3.5';
+const APP_VERSION = '3.6';
 
 // ── SUPABASE AUTH CONFIG ──
 const SB_URL = 'https://ctrwdnbmhrfweifgpxmb.supabase.co';
@@ -327,7 +327,7 @@ const INITIAL_DATA = {
     fiscalYearEnd:{month:12,day:31},
     fiscalYearLabel:'end',
     archivedYears:[],
-    supabase:{url:'',anonKey:'',enabled:false}
+    supabase:{url:SB_URL,anonKey:SB_ANON_KEY,enabled:true}
   }
 };
 
@@ -1321,13 +1321,9 @@ function SettingsScreen() {
   const [fyEndMonth,setFyEndMonth]=useState(fy.fiscalYearEnd?.month||12);
   const [fyEndDay,setFyEndDay]=useState(fy.fiscalYearEnd?.day||31);
   const [fyLabelMode,setFyLabelMode]=useState(fy.fiscalYearLabel||'end');
-  const [sbUrl,setSbUrl]=useState(fy.supabase?.url||'');
-  const [sbKey,setSbKey]=useState(fy.supabase?.anonKey||'');
-
   const handleImport=e=>{const file=e.target.files[0];if(!file)return;const r=new FileReader();r.onload=ev=>importData(ev.target.result);r.readAsText(file);};
   const saveFiscalYear=()=>{updateSettings({fiscalYearStart:{month:parseInt(fyStartMonth),day:parseInt(fyStartDay)},fiscalYearEnd:{month:parseInt(fyEndMonth),day:parseInt(fyEndDay)},fiscalYearLabel:fyLabelMode});showToast('Fiscal year updated');};
   const toggleArchive=year=>{const archived=archivedYears.includes(year)?archivedYears.filter(y=>y!==year):[...archivedYears,year];updateSettings({archivedYears:archived});showToast(archivedYears.includes(year)?'Year unarchived':'Year archived');};
-  const saveSupabase=()=>{updateSettings({supabase:{url:sbUrl,anonKey:sbKey,enabled:!!(sbUrl&&sbKey)}});showToast('Supabase settings saved');};
 
   const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -1377,13 +1373,10 @@ function SettingsScreen() {
     {/* Supabase */}
     <div className="card"><div className="card-header"><h3><Icon name="cloud" size={18} style={{marginRight:6}}/>Supabase Multi-User Sync</h3>
       <span className={`sb-status ${sbConnected?'sb-connected':'sb-disconnected'}`}><span className={`status-dot ${sbConnected?'dot-paid':'dot-pending'}`}></span>{sbConnected?'Connected':'Disconnected'}</span></div>
-      <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:12}}>Connect to a Supabase project to enable real-time multi-user access. All users connected to the same project will see live updates. Without Supabase, data is stored locally in the browser.</p>
+      <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:12}}>Real-time multi-user sync is active. All data — orders, inventory, deliveries, and settings — is automatically synced across all logged-in devices.</p>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-        <div className="form-group"><label>Supabase Project URL</label><input placeholder="https://xxxx.supabase.co" value={sbUrl} onChange={e=>setSbUrl(e.target.value)}/></div>
-        <div className="form-group"><label>Anon / Public Key</label><input placeholder="eyJhbGciOi..." value={sbKey} onChange={e=>setSbKey(e.target.value)}/></div>
-      </div>
-      <div style={{display:'flex',gap:8,marginTop:8}}><button className="btn btn-primary" onClick={saveSupabase}>Save & Connect</button>
-        {sbConnected&&<button className="btn btn-secondary" onClick={()=>{updateSettings({supabase:{url:'',anonKey:'',enabled:false}});showToast('Disconnected');}}>Disconnect</button>}
+        <div className="form-group"><label>Project</label><input value={SB_URL} disabled style={{background:'#f8fafc',color:'var(--text-secondary)'}}/></div>
+        <div className="form-group"><label>Status</label><input value={sbConnected?'Connected & syncing':'Connecting...'} disabled style={{background:sbConnected?'var(--success-bg)':'#f8fafc',color:sbConnected?'var(--success)':'var(--text-secondary)',fontWeight:600}}/></div>
       </div>
     </div>
 
