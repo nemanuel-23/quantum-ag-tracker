@@ -129,7 +129,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--primary-light);box-sh
 const {useState,useEffect,useCallback,useMemo,createContext,useContext,useRef} = React;
 
 // ── APP VERSION ──
-const APP_VERSION = '4.0';
+const APP_VERSION = '4.1';
 
 // ── SUPABASE AUTH CONFIG ──
 const SB_ROW_ID = '277449c7-b587-4e4d-bca0-835cbce1771e';
@@ -536,11 +536,25 @@ function AppProvider({children}) {
   const getProductDelivered=useCallback(pid=>data.deliveries.reduce((s,d)=>s+(d.products?.[pid]||0),0),[data.deliveries]);
   const getProductAvailable=useCallback(pid=>{const inv=data.inventory[pid]||{starting:0,additions:[]};const added=inv.additions.reduce((s,a)=>s+a.qty,0);return inv.starting+added-getProductTotalSold(pid);},[data.inventory,getProductTotalSold]);
   const getProductSoldNotDelivered=useCallback(pid=>getProductTotalSold(pid)-getProductDelivered(pid),[getProductTotalSold,getProductDelivered]);
+  // Per-order delivery tracking: how much of each product on a specific order has been delivered
+  const getOrderDelivered=useCallback((orderId)=>{
+    const totals={};
+    data.deliveries.filter(d=>d.orderId===orderId).forEach(d=>{
+      Object.entries(d.products||{}).forEach(([pid,qty])=>{totals[pid]=(totals[pid]||0)+qty;});
+    });
+    return totals;
+  },[data.deliveries]);
+  const getOrderDeliveryCount=useCallback((orderId)=>data.deliveries.filter(d=>d.orderId===orderId).length,[data.deliveries]);
+  const isOrderFullyDelivered=useCallback((orderId)=>{
+    const order=data.orders.find(o=>o.id===orderId);if(!order)return false;
+    const delivered=getOrderDelivered(orderId);
+    return Object.entries(order.products).every(([pid,qty])=>qty<=0||(delivered[pid]||0)>=qty);
+  },[data.orders,getOrderDelivered]);
 
   const exportData=()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='quantum-ag-backup-'+today()+'.json';a.click();URL.revokeObjectURL(u);showToast('Exported');};
   const importData=json=>{try{setData(JSON.parse(json));showToast('Imported');}catch(e){showToast('Invalid file');}};
 
-  return <AppContext.Provider value={{data,setData:updateData,activeProducts,activeCustomers,updateInventory,addInventory,addOrder,updateOrder,deleteOrder,addDelivery,updateDelivery,addGroup,updateGroup,deleteGroup,updateSettings,saveDeliveryTicket,getProductTotalSold,getProductDelivered,getProductAvailable,getProductSoldNotDelivered,exportData,importData,showToast,toast,sbConnected,activeYear,setActiveYear,availableYears,visibleYears,archivedYears,yearOrders,fyStart,fyLabel}}>{children}</AppContext.Provider>;
+  return <AppContext.Provider value={{data,setData:updateData,activeProducts,activeCustomers,updateInventory,addInventory,addOrder,updateOrder,deleteOrder,addDelivery,updateDelivery,addGroup,updateGroup,deleteGroup,updateSettings,saveDeliveryTicket,getProductTotalSold,getProductDelivered,getProductAvailable,getProductSoldNotDelivered,getOrderDelivered,getOrderDeliveryCount,isOrderFullyDelivered,exportData,importData,showToast,toast,sbConnected,activeYear,setActiveYear,availableYears,visibleYears,archivedYears,yearOrders,fyStart,fyLabel}}>{children}</AppContext.Provider>;
 }
 
 // ── MODAL ──
@@ -1096,13 +1110,16 @@ function DeliveriesScreen({onNavigate}) {
       <div className={`tab ${tab==='tickets'?'active':''}`} onClick={()=>setTab('tickets')}>Saved Tickets ({data.deliveryTickets?.length||0})</div>
     </div>
     {tab==='deliveries'&&<div className="card" style={{padding:0}}><table><thead><tr><SortTh label="Customer" colKey="customer" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Date" colKey="date" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Products" colKey="products" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Pumps" colKey="pumps" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Totes" colKey="totes" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Photos" colKey="photos" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><th></th></tr></thead><tbody>
-      {sortedDeliveries.length===0?<tr><td colSpan="7" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No deliveries recorded yet</td></tr>:sortedDeliveries.map(d=><tr key={d.id}>
-        <td style={{fontWeight:500}}>{d.customer}</td><td>{fmtDate(d.date)}</td>
+      {sortedDeliveries.length===0?<tr><td colSpan="7" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No deliveries recorded yet</td></tr>:sortedDeliveries.map(d=>{
+        const delCount=data.deliveries.filter(x=>x.orderId===d.orderId).length;
+        const delIdx=data.deliveries.filter(x=>x.orderId===d.orderId).findIndex(x=>x.id===d.id)+1;
+        return <tr key={d.id}>
+        <td style={{fontWeight:500}}>{d.customer}{delCount>1&&<span className="tag" style={{marginLeft:6,fontSize:10}}>#{delIdx} of {delCount}</span>}</td><td>{fmtDate(d.date)}</td>
         <td>{Object.entries(d.products||{}).filter(([,v])=>v>0).slice(0,3).map(([pid,qty])=>{const p=ALL_PRODUCTS.find(x=>x.id===pid);return <span key={pid} className="tag" style={{marginRight:4}}>{p?.name?.split('-')[0]?.trim()}: {fmt(qty)}</span>;})}</td>
         <td>{d.pumpsOut||'—'}</td><td>{d.totes||'—'}{d.totesReturned?' (in)':''}</td>
         <td>{(d.attachments||[]).length>0?<span className="tag">{d.attachments.length}</span>:'—'}</td>
         <td><button className="btn btn-sm btn-secondary" onClick={()=>setShowTicket(d)}><Icon name="printer" size={14}/>Ticket</button></td>
-      </tr>)}
+      </tr>;})}
     </tbody></table></div>}
     {tab==='pumps'&&<div className="card" style={{padding:0}}><table><thead><tr><SortTh label="Customer" colKey="customer" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Delivery Date" colKey="date" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Pumps Out" colKey="pumps" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Return Date" colKey="returnDate" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><th></th></tr></thead><tbody>
       {sortedPumps.length===0?<tr><td colSpan="5" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No pumps currently out</td></tr>:sortedPumps.map(d=><tr key={d.id}><td style={{fontWeight:500}}>{d.customer}</td><td>{fmtDate(d.date)}</td><td style={{fontWeight:600}}>{d.pumpsOut}</td><td>{d.pumpsReturnDate?fmtDate(d.pumpsReturnDate):'Not set'}</td>
@@ -1125,17 +1142,18 @@ function DeliveriesScreen({onNavigate}) {
 // ── NEW DELIVERY WITH PHOTO CAPTURE ──
 // ══════════════════════════════════════
 function NewDeliveryModal({onClose}) {
-  const {data,addDelivery,updateOrder,showToast,saveDeliveryTicket} = useApp();
+  const {data,addDelivery,updateOrder,showToast,saveDeliveryTicket,getOrderDelivered,getOrderDeliveryCount,isOrderFullyDelivered} = useApp();
   const [mode,setMode] = useState('individual');
   const [selectedOrder,setSelectedOrder] = useState('');
   const [selectedGroup,setSelectedGroup] = useState('');
   const [selectedGroupOrders,setSelectedGroupOrders] = useState([]);
   const [date,setDate] = useState(today());
   const [products,setProducts] = useState({});
+  const [includedProducts,setIncludedProducts] = useState({});
   const [pumpsOut,setPumpsOut] = useState('');
   const [pumpsReturnDate,setPumpsReturnDate] = useState('');
   const [totes,setTotes] = useState('');
-  const [markDelivered,setMarkDelivered] = useState(true);
+  const [markDelivered,setMarkDelivered] = useState(false);
   const [attachments,setAttachments] = useState([]);
   const [showCamera,setShowCamera] = useState(false);
   const videoRef = useRef(null);
@@ -1145,26 +1163,75 @@ function NewDeliveryModal({onClose}) {
   const [cameraMode,setCameraMode] = useState('photo');
   const fileInputRef = useRef(null);
 
-  const pendingOrders=data.orders.filter(o=>o.status!=='paid');
+  // Show orders that are not fully delivered
+  const deliverableOrders=data.orders.filter(o=>o.status!=='paid'||!isOrderFullyDelivered(o.id));
   const selectedOrderObj=data.orders.find(o=>o.id===selectedOrder);
-  const groupsWithPendingOrders=useMemo(()=>data.customerGroups.filter(g=>pendingOrders.some(o=>g.members.includes(o.customer))),[data.customerGroups,pendingOrders]);
+  const groupsWithPendingOrders=useMemo(()=>data.customerGroups.filter(g=>deliverableOrders.some(o=>g.members.includes(o.customer))),[data.customerGroups,deliverableOrders]);
   const selectedGroupObj=data.customerGroups.find(g=>g.name===selectedGroup);
-  const groupPendingOrders=useMemo(()=>selectedGroupObj?pendingOrders.filter(o=>selectedGroupObj.members.includes(o.customer)):[], [selectedGroupObj,pendingOrders]);
+  const groupPendingOrders=useMemo(()=>selectedGroupObj?deliverableOrders.filter(o=>selectedGroupObj.members.includes(o.customer)):[], [selectedGroupObj,deliverableOrders]);
 
-  useEffect(()=>{if(mode==='individual'&&selectedOrderObj)setProducts({...selectedOrderObj.products});},[selectedOrder,mode]);
+  // Calculate remaining quantities for the selected order
+  const orderRemaining=useMemo(()=>{
+    if(!selectedOrderObj) return {};
+    const delivered=getOrderDelivered(selectedOrderObj.id);
+    const remaining={};
+    Object.entries(selectedOrderObj.products).forEach(([pid,qty])=>{
+      remaining[pid]=Math.max(0,qty-(delivered[pid]||0));
+    });
+    return remaining;
+  },[selectedOrderObj,getOrderDelivered]);
+
+  const deliveryNum=selectedOrderObj?getOrderDeliveryCount(selectedOrderObj.id)+1:1;
+
+  // When order is selected, default deliver quantities to remaining amounts
+  useEffect(()=>{
+    if(mode==='individual'&&selectedOrderObj){
+      const delivered=getOrderDelivered(selectedOrderObj.id);
+      const remaining={};const included={};
+      Object.entries(selectedOrderObj.products).forEach(([pid,qty])=>{
+        const rem=Math.max(0,qty-(delivered[pid]||0));
+        remaining[pid]=rem;
+        included[pid]=rem>0;
+      });
+      setProducts(remaining);
+      setIncludedProducts(included);
+      // Auto-check "mark delivered" if this delivery covers everything remaining
+      setMarkDelivered(Object.values(remaining).every(v=>v<=0)?false:true);
+    }
+  },[selectedOrder,mode]);
   useEffect(()=>{
     if(mode==='group'&&selectedGroupObj){
       const ids=groupPendingOrders.map(o=>o.id);setSelectedGroupOrders(ids);
-      const combined={};groupPendingOrders.forEach(o=>{Object.entries(o.products).forEach(([pid,qty])=>{combined[pid]=(combined[pid]||0)+qty;});});setProducts(combined);
+      const combined={};const included={};
+      groupPendingOrders.forEach(o=>{
+        const delivered=getOrderDelivered(o.id);
+        Object.entries(o.products).forEach(([pid,qty])=>{
+          const rem=Math.max(0,qty-(delivered[pid]||0));
+          combined[pid]=(combined[pid]||0)+rem;
+          if(rem>0)included[pid]=true;
+        });
+      });
+      setProducts(combined);setIncludedProducts(included);
     }
   },[selectedGroup,mode]);
 
   const toggleGroupOrder=orderId=>{
     setSelectedGroupOrders(prev=>{
       const next=prev.includes(orderId)?prev.filter(id=>id!==orderId):[...prev,orderId];
-      const combined={};groupPendingOrders.filter(o=>next.includes(o.id)).forEach(o=>{Object.entries(o.products).forEach(([pid,qty])=>{combined[pid]=(combined[pid]||0)+qty;});});setProducts(combined);return next;
+      const combined={};const included={};
+      groupPendingOrders.filter(o=>next.includes(o.id)).forEach(o=>{
+        const delivered=getOrderDelivered(o.id);
+        Object.entries(o.products).forEach(([pid,qty])=>{
+          const rem=Math.max(0,qty-(delivered[pid]||0));
+          combined[pid]=(combined[pid]||0)+rem;
+          if(rem>0)included[pid]=true;
+        });
+      });
+      setProducts(combined);setIncludedProducts(included);return next;
     });
   };
+
+  const toggleProduct=(pid)=>setIncludedProducts(prev=>({...prev,[pid]:!prev[pid]}));
 
   // Camera functions
   const startCamera=async()=>{
@@ -1207,19 +1274,45 @@ function NewDeliveryModal({onClose}) {
   const hasSelection=mode==='individual'?!!selectedOrderObj:selectedGroupOrders.length>0;
 
   const save=()=>{
+    // Build delivery products: only included products with qty > 0
+    const deliverProducts={};
+    Object.entries(products).forEach(([pid,qty])=>{
+      if(includedProducts[pid]&&qty>0) deliverProducts[pid]=qty;
+    });
+    if(Object.keys(deliverProducts).length===0&&!(parseInt(pumpsOut)>0)&&!(parseInt(totes)>0)){alert('No products or equipment selected for delivery');return;}
+
     if(mode==='individual'){
       if(!selectedOrderObj){alert('Select an order');return;}
-      addDelivery({customer:selectedOrderObj.customer,orderId:selectedOrderObj.id,date,products,pumpsOut:parseInt(pumpsOut)||0,pumpsReturnDate,pumpsReturned:false,totes:parseInt(totes)||0,totesReturned:false,attachments});
-      saveDeliveryTicket({customer:selectedOrderObj.customer,date,products:{...products},pumpsOut:parseInt(pumpsOut)||0,totes:parseInt(totes)||0,productCount:Object.keys(products).filter(k=>products[k]>0).length,attachments});
-      if(markDelivered)updateOrder(selectedOrderObj.id,{status:'paid'});
+      addDelivery({customer:selectedOrderObj.customer,orderId:selectedOrderObj.id,date,products:deliverProducts,deliveryNum,pumpsOut:parseInt(pumpsOut)||0,pumpsReturnDate,pumpsReturned:false,totes:parseInt(totes)||0,totesReturned:false,attachments});
+      saveDeliveryTicket({customer:selectedOrderObj.customer,date,products:{...deliverProducts},pumpsOut:parseInt(pumpsOut)||0,totes:parseInt(totes)||0,productCount:Object.keys(deliverProducts).length,deliveryNum,attachments});
+      // Determine order status: check if everything is now delivered
+      if(markDelivered){
+        const prevDelivered=getOrderDelivered(selectedOrderObj.id);
+        const allDelivered=Object.entries(selectedOrderObj.products).every(([pid,qty])=>{
+          if(qty<=0)return true;
+          const totalDel=(prevDelivered[pid]||0)+(deliverProducts[pid]||0);
+          return totalDel>=qty;
+        });
+        updateOrder(selectedOrderObj.id,{status:allDelivered?'paid':'partial-deliver'});
+      }
     } else {
       if(selectedGroupOrders.length===0){alert('Select at least one order');return;}
       const ordersToDeliver=groupPendingOrders.filter(o=>selectedGroupOrders.includes(o.id));
       ordersToDeliver.forEach(o=>{
-        addDelivery({customer:o.customer,orderId:o.id,groupName:selectedGroup,date,products:{...o.products},pumpsOut:0,pumpsReturnDate:'',pumpsReturned:false,totes:0,totesReturned:false,attachments:[]});
-        if(markDelivered)updateOrder(o.id,{status:'paid'});
+        // Split delivery products proportionally for each order in group
+        const orderDeliverProducts={};
+        const delivered=getOrderDelivered(o.id);
+        Object.entries(o.products).forEach(([pid,qty])=>{
+          const rem=Math.max(0,qty-(delivered[pid]||0));
+          if(includedProducts[pid]&&rem>0) orderDeliverProducts[pid]=rem;
+        });
+        addDelivery({customer:o.customer,orderId:o.id,groupName:selectedGroup,date,products:orderDeliverProducts,pumpsOut:0,pumpsReturnDate:'',pumpsReturned:false,totes:0,totesReturned:false,attachments:[]});
+        if(markDelivered){
+          const allDel=Object.entries(o.products).every(([pid,qty])=>qty<=0||((delivered[pid]||0)+(orderDeliverProducts[pid]||0))>=qty);
+          updateOrder(o.id,{status:allDel?'paid':'partial-deliver'});
+        }
       });
-      saveDeliveryTicket({customer:selectedGroup+' (Group)',date,products:{...products},pumpsOut:parseInt(pumpsOut)||0,totes:parseInt(totes)||0,productCount:Object.keys(products).filter(k=>products[k]>0).length,attachments});
+      saveDeliveryTicket({customer:selectedGroup+' (Group)',date,products:{...deliverProducts},pumpsOut:parseInt(pumpsOut)||0,totes:parseInt(totes)||0,productCount:Object.keys(deliverProducts).length,attachments});
       if((parseInt(pumpsOut)||0)>0||(parseInt(totes)||0)>0){addDelivery({customer:selectedGroup+' (Group)',orderId:'group_'+selectedGroup,groupName:selectedGroup,date,products:{},pumpsOut:parseInt(pumpsOut)||0,pumpsReturnDate,pumpsReturned:false,totes:parseInt(totes)||0,totesReturned:false,attachments});}
       showToast(`${ordersToDeliver.length} deliveries recorded for ${selectedGroup}`);
     }
@@ -1242,10 +1335,25 @@ function NewDeliveryModal({onClose}) {
           <input type="checkbox" checked={selectedGroupOrders.includes(o.id)} onChange={()=>toggleGroupOrder(o.id)} style={{width:'auto'}}/><span style={{fontWeight:500,flex:1}}>{o.customer}</span><span style={{fontSize:12,color:'var(--text-secondary)'}}>{fmtDate(o.date)}</span><span className="tag">{pc} product{pc!==1?'s':''}</span></label>;})}
       </div></div>}
       {hasSelection&&<>
+        {mode==='individual'&&selectedOrderObj&&deliveryNum>1&&<div style={{background:'var(--primary-bg)',border:'1px solid var(--primary-light)',borderRadius:6,padding:'10px 14px',margin:'12px 0',fontSize:13}}>
+          <strong>Delivery #{deliveryNum}</strong> for this order. Quantities below show what remains to be delivered.
+        </div>}
         <h4 style={{fontSize:14,fontWeight:600,margin:'16px 0 8px'}}>{mode==='group'?'Combined Products':'Products to Deliver'}</h4>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:8}}>
-          {Object.entries(products).filter(([,v])=>v>0).map(([pid,qty])=>{const p=ALL_PRODUCTS.find(x=>x.id===pid);return <div key={pid} style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontSize:12,flex:1}}>{p?.name}</span><input type="number" step="0.1" style={{width:80}} value={qty} onChange={e=>{const v=parseFloat(e.target.value)||0;setProducts(ps=>({...ps,[pid]:v}));}}/></div>;})}
-        </div>
+        <table style={{fontSize:13}}><thead><tr><th style={{width:30,padding:'6px 8px'}}></th><th style={{textAlign:'left'}}>Product</th>{mode==='individual'&&<th style={{textAlign:'right',width:70}}>Ordered</th>}{mode==='individual'&&<th style={{textAlign:'right',width:90}}>Previously Delivered</th>}<th style={{textAlign:'right',width:90}}>Remaining</th><th style={{textAlign:'right',width:100}}>Deliver Now</th></tr></thead><tbody>
+          {Object.entries(mode==='individual'&&selectedOrderObj?selectedOrderObj.products:products).filter(([,v])=>v>0).map(([pid,orderedQty])=>{
+            const p=ALL_PRODUCTS.find(x=>x.id===pid);
+            const prevDel=mode==='individual'&&selectedOrderObj?(getOrderDelivered(selectedOrderObj.id)[pid]||0):0;
+            const remaining=mode==='individual'?Math.max(0,orderedQty-prevDel):(products[pid]||0);
+            const included=includedProducts[pid]||false;
+            return <tr key={pid} style={{opacity:included?1:0.4}}>
+              <td style={{padding:'6px 8px'}}><input type="checkbox" checked={included} onChange={()=>toggleProduct(pid)} style={{width:'auto'}}/></td>
+              <td style={{fontWeight:500}}>{p?.name}</td>
+              {mode==='individual'&&<td className="inv-cell">{fmt(orderedQty)}</td>}
+              {mode==='individual'&&<td className="inv-cell" style={{color:prevDel>0?'var(--primary)':'var(--text-secondary)'}}>{fmt(prevDel)}</td>}
+              <td className="inv-cell" style={{fontWeight:600,color:remaining>0?'var(--warning)':'var(--success)'}}>{fmt(remaining)}</td>
+              <td style={{textAlign:'right',padding:'4px 8px'}}><input type="number" step="0.1" min="0" max={remaining} style={{width:80,textAlign:'right'}} disabled={!included} value={included?(products[pid]||0):0} onChange={e=>{const v=Math.min(parseFloat(e.target.value)||0,remaining);setProducts(ps=>({...ps,[pid]:v}));}}/></td>
+            </tr>;})}
+        </tbody></table>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginTop:16}}>
           <div className="form-group"><label>Pumps Out (qty)</label><input type="number" value={pumpsOut} onChange={e=>setPumpsOut(e.target.value)} placeholder="0"/></div>
           <div className="form-group"><label>Pump Return Date</label><input type="date" value={pumpsReturnDate} onChange={e=>setPumpsReturnDate(e.target.value)}/></div>
@@ -1277,7 +1385,7 @@ function NewDeliveryModal({onClose}) {
 
         <label style={{display:'flex',alignItems:'center',gap:8,marginTop:12,cursor:'pointer',fontSize:13}}>
           <input type="checkbox" checked={markDelivered} onChange={e=>setMarkDelivered(e.target.checked)} style={{width:'auto'}}/>
-          Mark {mode==='group'?'all selected orders':'order'} as "Paid & Delivered"
+          Update order status (marks as "Partial Delivery" or "Paid & Delivered" based on quantities)
         </label>
       </>}
     </div>
