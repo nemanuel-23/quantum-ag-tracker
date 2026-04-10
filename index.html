@@ -129,7 +129,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--primary-light);box-sh
 const {useState,useEffect,useCallback,useMemo,createContext,useContext,useRef} = React;
 
 // ── APP VERSION ──
-const APP_VERSION = '5.0';
+const APP_VERSION = '5.1';
 
 // ── SUPABASE AUTH CONFIG ──
 const SB_ROW_ID = '277449c7-b587-4e4d-bca0-835cbce1771e';
@@ -459,11 +459,14 @@ function AppProvider({children}) {
   useEffect(()=>{localStorage.setItem('quantumag_data',JSON.stringify(data));localStorage.setItem('quantumag_version',APP_VERSION);},[data]);
 
   // Push to Supabase whenever data changes — but ONLY after initial fetch completes
+  // Strip base64 attachment data before pushing (too large for Supabase; attachments stay local only)
   useEffect(()=>{
     if(!supabaseClient) return;
     if(!hasFetched.current) return;
     if(isRemoteUpdate.current){isRemoteUpdate.current=false;return;}
-    supabaseClient.from('app_data').upsert({id:SB_ROW_ID,data:data,updated_at:new Date().toISOString()})
+    const stripAttachments=arr=>(arr||[]).map(item=>({...item,attachments:(item.attachments||[]).map(a=>({type:a.type,timestamp:a.timestamp}))}));
+    const syncData={...data,deliveries:stripAttachments(data.deliveries),deliveryTickets:stripAttachments(data.deliveryTickets)};
+    supabaseClient.from('app_data').upsert({id:SB_ROW_ID,data:syncData,updated_at:new Date().toISOString()})
       .then(({error})=>{if(error)console.warn('Supabase push error:',error.message);});
   },[data]);
 
@@ -601,7 +604,7 @@ function Modal({title,onClose,children,wide}){
 // ── DASHBOARD WITH DRILL-DOWNS ──
 // ══════════════════════════════════
 function Dashboard() {
-  const {data,activeProducts,yearOrders,activeYear,getProductAvailable,getProductTotalSold,getProductDelivered,getProductSoldNotDelivered} = useApp();
+  const {data,activeProducts,yearOrders,activeYear,getProductAvailable,getProductTotalSold,getProductDelivered,getProductSoldNotDelivered,allProducts} = useApp();
   const [drillDown,setDrillDown] = useState(null);
   const [expandedProduct,setExpandedProduct] = useState(null);
 
@@ -711,9 +714,12 @@ function Dashboard() {
         <div className="drill-panel">
           <div className="drill-header"><h3>Orders Delivered — {activeYear}</h3><button className="btn-icon" onClick={()=>setDrillDown(null)}><Icon name="x"/></button></div>
           {ordersDelivered.length===0?<p style={{color:'var(--text-secondary)',fontSize:13}}>No deliveries yet for {activeYear}.</p>:(
-            <table><thead><tr><th>Customer</th><th>Date</th><th>Products</th></tr></thead>
-            <tbody>{ordersDelivered.map(o=>{const pc=Object.keys(o.products).filter(k=>o.products[k]>0).length;return(
-              <tr key={o.id}><td style={{fontWeight:500}}>{o.customer}</td><td>{fmtDate(o.date)}</td><td><span className="tag">{pc} product{pc!==1?'s':''}</span></td></tr>
+            <table><thead><tr><th>Customer</th><th>Order Date</th><th>Delivery Date</th><th>Products</th></tr></thead>
+            <tbody>{ordersDelivered.map(o=>{
+              const pc=Object.keys(o.products).filter(k=>o.products[k]>0).length;
+              const lastDelivery=data.deliveries.filter(d=>d.orderId===o.id).sort((a,b)=>new Date(b.date||0)-new Date(a.date||0))[0];
+              return(
+              <tr key={o.id}><td style={{fontWeight:500}}>{o.customer}</td><td>{fmtDate(o.date)}</td><td style={{fontWeight:500,color:'var(--success)'}}>{lastDelivery?fmtDate(lastDelivery.date):'—'}</td><td><span className="tag">{pc} product{pc!==1?'s':''}</span></td></tr>
             );})}</tbody></table>
           )}
         </div>
@@ -730,21 +736,15 @@ function Dashboard() {
         </div>
       )}
 
-      {/* Status summary + groups card */}
-      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}>
-        <div className="card">
-          <div className="card-header"><h3>Order Status Breakdown</h3></div>
+      {/* Status summary */}
+      <div className="card">
+        <div className="card-header"><h3>Order Status Breakdown — {activeYear}</h3></div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:8}}>
           {STATUS_OPTIONS.map(s=>{const c=yearOrders.filter(o=>o.status===s.value).length;return(
-            <div key={s.value} style={{display:'flex',alignItems:'center',gap:10,marginBottom:8}}>
-              <span className={`status-dot ${s.dot}`}></span><span style={{flex:1,fontSize:13}}>{s.label}</span><span style={{fontWeight:700,fontSize:16}}>{c}</span>
+            <div key={s.value} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 12px',background:'#f8fafc',borderRadius:6}}>
+              <span className={`status-dot ${s.dot}`}></span><span style={{flex:1,fontSize:13}}>{s.label}</span><span style={{fontWeight:700,fontSize:18}}>{c}</span>
             </div>
           );})}
-        </div>
-        <div className="card">
-          <div className="card-header"><h3>Customer Groups</h3></div>
-          {data.customerGroups.map((g,i)=>(
-            <div key={i} style={{marginBottom:10}}><div style={{fontWeight:600,fontSize:13,color:'var(--primary)'}}>{g.name}</div><div style={{fontSize:12,color:'var(--text-secondary)'}}>{g.members.join(', ')}</div></div>
-          ))}
         </div>
       </div>
     </div>
@@ -773,16 +773,16 @@ function InventoryScreen() {
   const handleAdd=()=>{if(!addQty||isNaN(addQty))return;addInventory(addModal,{date:addDate,qty:parseFloat(addQty),note:addNote});setAddModal(null);setAddQty('');setAddNote('');showToast('Inventory added');};
 
   const invRows = useMemo(()=>{
-    const rows=activeProducts.map(p=>{
+    const rows=allProducts.map(p=>{
       const inv=data.inventory[p.id]||{starting:0,additions:[]};const added=inv.additions.reduce((s,a)=>s+a.qty,0);
       return{...p,inv,added,sold:getProductTotalSold(p.id),delivered:getProductDelivered(p.id),snd:getProductSoldNotDelivered(p.id),avail:getProductAvailable(p.id)};
     });
-    return invSort(rows,(r,k)=>{switch(k){case'name':return r.name;case'starting':return r.inv.starting;case'added':return r.added;case'sold':return r.sold;case'delivered':return r.delivered;case'snd':return r.snd;case'avail':return r.avail;default:return r.name;}});
-  },[activeProducts,data.inventory,getProductTotalSold,getProductDelivered,getProductSoldNotDelivered,getProductAvailable,invSK,invSD]);
+    return invSort(rows,(r,k)=>{switch(k){case'name':return r.name;case'packaging':return r.packaging||'';case'starting':return r.inv.starting;case'added':return r.added;case'sold':return r.sold;case'delivered':return r.delivered;case'snd':return r.snd;case'avail':return r.avail;default:return r.name;}});
+  },[allProducts,data.inventory,getProductTotalSold,getProductDelivered,getProductSoldNotDelivered,getProductAvailable,invSK,invSD]);
 
   const openBulkModal=()=>{setBulkModal(true);setBulkDate(today());setBulkNote('');setBulkSelected({});setBulkQtys({});};
   const toggleBulkProduct=(pid)=>{setBulkSelected(s=>({...s,[pid]:!s[pid]}));};
-  const selectAllBulk=()=>{const all={};activeProducts.forEach(p=>{all[p.id]=true;});setBulkSelected(all);};
+  const selectAllBulk=()=>{const all={};allProducts.forEach(p=>{all[p.id]=true;});setBulkSelected(all);};
   const clearAllBulk=()=>{setBulkSelected({});setBulkQtys({});};
   const setBulkQty=(pid,val)=>{setBulkQtys(q=>({...q,[pid]:val}));};
   const selectedCount=Object.values(bulkSelected).filter(Boolean).length;
@@ -804,17 +804,31 @@ function InventoryScreen() {
         <button className="btn btn-primary" onClick={openBulkModal}><Icon name="plus" size={14}/>Bulk Add Inventory</button>
       </div>
       <div className="card"><div className="inv-table-wrap"><table>
-        <thead><tr><SortTh label="Product" colKey="name" sortKey={invSK} sortDir={invSD} onSort={invToggle}/><SortTh label="Starting" colKey="starting" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/><SortTh label="Added" colKey="added" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/><SortTh label="Total Sold" colKey="sold" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/><SortTh label="Delivered" colKey="delivered" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/><SortTh label="Sold, Not Delivered" colKey="snd" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/><SortTh label="Available" colKey="avail" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/><th></th></tr></thead>
+        <thead><tr>
+          <SortTh label="Product" colKey="name" sortKey={invSK} sortDir={invSD} onSort={invToggle}/>
+          <SortTh label="Packaging" colKey="packaging" sortKey={invSK} sortDir={invSD} onSort={invToggle}/>
+          <SortTh label="Starting" colKey="starting" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/>
+          <SortTh label="Added" colKey="added" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/>
+          <SortTh label="Total Sold" colKey="sold" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/>
+          <SortTh label="Delivered" colKey="delivered" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/>
+          <SortTh label="Sold, Not Del." colKey="snd" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/>
+          <SortTh label="Available" colKey="avail" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/>
+          <th></th>
+        </tr></thead>
         <tbody>{invRows.map(p=>{
           return <tr key={p.id}>
-            <td style={{fontWeight:500}}>{productDisplayName(p)}</td>
-            <td className="inv-cell" style={{cursor:'pointer',textDecoration:'underline dotted'}} onClick={()=>{setEditModal(p.id);setEditVal(p.inv.starting);}}>{fmt(p.inv.starting)}</td>
+            <td style={{fontWeight:500}}>{p.name}</td>
+            <td>{p.packaging?<span className="tag" style={{background:p.packaging==='Tote'?'var(--purple-bg)':'var(--cyan-bg)',color:p.packaging==='Tote'?'var(--purple)':'var(--cyan)',fontSize:11}}>{p.packaging}</span>:<span style={{color:'var(--text-secondary)',fontSize:12}}>—</span>}</td>
+            <td className="inv-cell">{fmt(p.inv.starting)}</td>
             <td className="inv-cell positive">{p.added>0?'+'+fmt(p.added):'—'}{p.inv.additions.length>0&&<div style={{fontSize:10,color:'#94a3b8'}}>{p.inv.additions.length} addition{p.inv.additions.length>1?'s':''}</div>}</td>
             <td className="inv-cell">{fmt(p.sold)}</td>
             <td className="inv-cell" style={{color:'var(--success)'}}>{fmt(p.delivered)}</td>
             <td className="inv-cell" style={{color:p.snd>0?'var(--warning)':'inherit',fontWeight:p.snd>0?600:400}}>{fmt(Math.max(0,p.snd))}</td>
             <td className={`inv-cell ${p.avail<0?'negative':'positive'}`} style={{fontWeight:700}}>{fmt(p.avail)}</td>
-            <td><button className="btn btn-sm btn-secondary" onClick={()=>setAddModal(p.id)}><Icon name="plus" size={14}/>Add</button></td>
+            <td style={{textAlign:'right',whiteSpace:'nowrap'}}>
+              <button className="btn btn-sm btn-secondary" style={{marginRight:4}} onClick={()=>setEditModal(p.id)}><Icon name="edit" size={14}/>Edit</button>
+              <button className="btn btn-sm btn-secondary" onClick={()=>setAddModal(p.id)}><Icon name="plus" size={14}/>Add</button>
+            </td>
           </tr>;
         })}</tbody>
       </table></div></div>
@@ -848,10 +862,8 @@ function InventoryScreen() {
             </div>
             <div style={{maxHeight:400,overflowY:'auto',border:'1px solid var(--border)',borderRadius:6}}>
               <table>
-                <thead><tr><th style={{width:36}}></th><th>Product</th><th style={{textAlign:'right',width:100}}>Current</th><th style={{width:120}}>Add Qty</th></tr></thead>
-                <tbody>{activeProducts.map(p=>{
-                  const inv=data.inventory[p.id]||{starting:0,additions:[]};
-                  const added=inv.additions.reduce((s,a)=>s+a.qty,0);
+                <thead><tr><th style={{width:36}}></th><th>Product</th><th style={{textAlign:'right',width:100}}>Current Avail.</th><th style={{width:120}}>Add Qty</th></tr></thead>
+                <tbody>{allProducts.map(p=>{
                   const avail=getProductAvailable(p.id);
                   const sel=!!bulkSelected[p.id];
                   return <tr key={p.id} style={{background:sel?'var(--primary-bg)':'transparent',cursor:'pointer'}} onClick={()=>toggleBulkProduct(p.id)}>
@@ -871,13 +883,62 @@ function InventoryScreen() {
         </div>
       </div>}
 
-      {/* Edit starting inventory modal */}
-      {editModal&&<Modal title={`Edit Starting Inventory — ${productDisplayName(allProducts.find(p=>p.id===editModal)||{name:editModal})}`} onClose={()=>setEditModal(null)}>
-        <div className="modal-body"><div className="form-group"><label>Starting Inventory</label><input type="number" step="0.1" value={editVal} onChange={e=>setEditVal(e.target.value)}/></div></div>
-        <div className="modal-footer"><button className="btn btn-secondary" onClick={()=>setEditModal(null)}>Cancel</button><button className="btn btn-primary" onClick={()=>{updateInventory(editModal,'starting',parseFloat(editVal)||0);setEditModal(null);showToast('Updated');}}>Save</button></div>
-      </Modal>}
+      {/* Full inventory edit modal — starting qty + manage additions */}
+      {editModal&&<InventoryEditModal productId={editModal} onClose={()=>setEditModal(null)}/>}
     </div>
   );
+}
+
+function InventoryEditModal({productId,onClose}) {
+  const {data,allProducts,updateInventory,showToast} = useApp();
+  const p = allProducts.find(x=>x.id===productId)||{name:productId,packaging:''};
+  const inv = data.inventory[productId]||{starting:0,additions:[]};
+  const [starting,setStarting] = useState(String(inv.starting));
+  const [additions,setAdditions] = useState(inv.additions.map((a,i)=>({...a,_key:i})));
+  const [newDate,setNewDate] = useState(today());
+  const [newQty,setNewQty] = useState('');
+  const [newNote,setNewNote] = useState('');
+
+  const addRow=()=>{
+    const qty=parseFloat(newQty);
+    if(!qty||isNaN(qty)){alert('Enter a valid quantity');return;}
+    setAdditions(prev=>[...prev,{date:newDate,qty,note:newNote,_key:Date.now()}]);
+    setNewQty('');setNewNote('');
+  };
+  const deleteRow=key=>setAdditions(prev=>prev.filter(a=>a._key!==key));
+  const updateRow=(key,field,val)=>setAdditions(prev=>prev.map(a=>a._key===key?{...a,[field]:field==='qty'?parseFloat(val)||0:val}:a));
+
+  const save=()=>{
+    const clean=additions.map(({_key,...rest})=>rest);
+    updateInventory(productId,'starting',parseFloat(starting)||0);
+    updateInventory(productId,'additions',clean);
+    showToast('Inventory updated');
+    onClose();
+  };
+
+  return <Modal title={`Edit Inventory — ${productDisplayName(p)}`} onClose={onClose} wide>
+    <div className="modal-body">
+      <div className="form-group" style={{maxWidth:200}}><label>Starting Inventory</label><input type="number" step="0.1" value={starting} onChange={e=>setStarting(e.target.value)}/></div>
+      <h4 style={{fontSize:13,fontWeight:600,margin:'16px 0 8px'}}>Inventory Additions</h4>
+      <table style={{fontSize:13}}><thead><tr><th>Date</th><th style={{textAlign:'right'}}>Qty</th><th>Note</th><th></th></tr></thead>
+        <tbody>
+          {additions.map(a=><tr key={a._key}>
+            <td><input type="date" value={a.date} onChange={e=>updateRow(a._key,'date',e.target.value)} style={{padding:'4px 6px',fontSize:12}}/></td>
+            <td><input type="number" step="0.1" value={a.qty} onChange={e=>updateRow(a._key,'qty',e.target.value)} style={{width:80,textAlign:'right',padding:'4px 6px',fontSize:12}}/></td>
+            <td><input value={a.note||''} onChange={e=>updateRow(a._key,'note',e.target.value)} placeholder="Note" style={{padding:'4px 6px',fontSize:12}}/></td>
+            <td><button className="btn-icon" onClick={()=>deleteRow(a._key)}><Icon name="trash" size={14}/></button></td>
+          </tr>)}
+          <tr style={{background:'var(--primary-bg)'}}>
+            <td><input type="date" value={newDate} onChange={e=>setNewDate(e.target.value)} style={{padding:'4px 6px',fontSize:12}}/></td>
+            <td><input type="number" step="0.1" placeholder="Qty" value={newQty} onChange={e=>setNewQty(e.target.value)} style={{width:80,textAlign:'right',padding:'4px 6px',fontSize:12}}/></td>
+            <td><input value={newNote} onChange={e=>setNewNote(e.target.value)} placeholder="Note (optional)" style={{padding:'4px 6px',fontSize:12}}/></td>
+            <td><button className="btn btn-sm btn-primary" onClick={addRow}><Icon name="plus" size={12}/>Add</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={save}>Save Changes</button></div>
+  </Modal>;
 }
 
 // ══════════════════════
@@ -1201,7 +1262,6 @@ function NewDeliveryModal({onClose}) {
   const [pumpsOut,setPumpsOut] = useState('');
   const [pumpsReturnDate,setPumpsReturnDate] = useState('');
   const [totes,setTotes] = useState('');
-  const [markDelivered,setMarkDelivered] = useState(false);
   const [attachments,setAttachments] = useState([]);
   const [showCamera,setShowCamera] = useState(false);
   const videoRef = useRef(null);
@@ -1243,8 +1303,6 @@ function NewDeliveryModal({onClose}) {
       });
       setProducts(remaining);
       setIncludedProducts(included);
-      // Auto-check "mark delivered" if this delivery covers everything remaining
-      setMarkDelivered(Object.values(remaining).every(v=>v<=0)?false:true);
     }
   },[selectedOrder,mode]);
   useEffect(()=>{
@@ -1333,21 +1391,17 @@ function NewDeliveryModal({onClose}) {
       if(!selectedOrderObj){alert('Select an order');return;}
       addDelivery({customer:selectedOrderObj.customer,orderId:selectedOrderObj.id,date,products:deliverProducts,deliveryNum,pumpsOut:parseInt(pumpsOut)||0,pumpsReturnDate,pumpsReturned:false,totes:parseInt(totes)||0,totesReturned:false,attachments});
       saveDeliveryTicket({customer:selectedOrderObj.customer,date,products:{...deliverProducts},pumpsOut:parseInt(pumpsOut)||0,totes:parseInt(totes)||0,productCount:Object.keys(deliverProducts).length,deliveryNum,attachments});
-      // Determine order status: check if everything is now delivered
-      if(markDelivered){
-        const prevDelivered=getOrderDelivered(selectedOrderObj.id);
-        const allDelivered=Object.entries(selectedOrderObj.products).every(([pid,qty])=>{
-          if(qty<=0)return true;
-          const totalDel=(prevDelivered[pid]||0)+(deliverProducts[pid]||0);
-          return totalDel>=qty;
-        });
-        updateOrder(selectedOrderObj.id,{status:allDelivered?'paid':'partial-deliver'});
-      }
+      // Always auto-update order status based on how much has been delivered
+      const prevDelivered=getOrderDelivered(selectedOrderObj.id);
+      const allDelivered=Object.entries(selectedOrderObj.products).every(([pid,qty])=>{
+        if(qty<=0)return true;
+        return((prevDelivered[pid]||0)+(deliverProducts[pid]||0))>=qty;
+      });
+      updateOrder(selectedOrderObj.id,{status:allDelivered?'paid':'partial-deliver'});
     } else {
       if(selectedGroupOrders.length===0){alert('Select at least one order');return;}
       const ordersToDeliver=groupPendingOrders.filter(o=>selectedGroupOrders.includes(o.id));
       ordersToDeliver.forEach(o=>{
-        // Split delivery products proportionally for each order in group
         const orderDeliverProducts={};
         const delivered=getOrderDelivered(o.id);
         Object.entries(o.products).forEach(([pid,qty])=>{
@@ -1355,10 +1409,8 @@ function NewDeliveryModal({onClose}) {
           if(includedProducts[pid]&&rem>0) orderDeliverProducts[pid]=rem;
         });
         addDelivery({customer:o.customer,orderId:o.id,groupName:selectedGroup,date,products:orderDeliverProducts,pumpsOut:0,pumpsReturnDate:'',pumpsReturned:false,totes:0,totesReturned:false,attachments:[]});
-        if(markDelivered){
-          const allDel=Object.entries(o.products).every(([pid,qty])=>qty<=0||((delivered[pid]||0)+(orderDeliverProducts[pid]||0))>=qty);
-          updateOrder(o.id,{status:allDel?'paid':'partial-deliver'});
-        }
+        const allDel=Object.entries(o.products).every(([pid,qty])=>qty<=0||((delivered[pid]||0)+(orderDeliverProducts[pid]||0))>=qty);
+        updateOrder(o.id,{status:allDel?'paid':'partial-deliver'});
       });
       saveDeliveryTicket({customer:selectedGroup+' (Group)',date,products:{...deliverProducts},pumpsOut:parseInt(pumpsOut)||0,totes:parseInt(totes)||0,productCount:Object.keys(deliverProducts).length,attachments});
       if((parseInt(pumpsOut)||0)>0||(parseInt(totes)||0)>0){addDelivery({customer:selectedGroup+' (Group)',orderId:'group_'+selectedGroup,groupName:selectedGroup,date,products:{},pumpsOut:parseInt(pumpsOut)||0,pumpsReturnDate,pumpsReturned:false,totes:parseInt(totes)||0,totesReturned:false,attachments});}
@@ -1431,10 +1483,9 @@ function NewDeliveryModal({onClose}) {
           </div>)}</div>}
         </div>
 
-        <label style={{display:'flex',alignItems:'center',gap:8,marginTop:12,cursor:'pointer',fontSize:13}}>
-          <input type="checkbox" checked={markDelivered} onChange={e=>setMarkDelivered(e.target.checked)} style={{width:'auto'}}/>
-          Update order status (marks as "Partial Delivery" or "Paid & Delivered" based on quantities)
-        </label>
+        <div style={{marginTop:12,padding:'8px 12px',background:'var(--primary-bg)',borderRadius:6,fontSize:12,color:'var(--primary)'}}>
+          Order status will be automatically updated to <strong>Partial Delivery</strong> or <strong>Paid &amp; Delivered</strong> based on quantities entered.
+        </div>
       </>}
     </div>
     <div className="modal-footer"><button className="btn btn-secondary" onClick={()=>{stopCamera();onClose();}}>Cancel</button><button className="btn btn-success" onClick={save} disabled={!hasSelection}><Icon name="truck" size={14}/>Record Delivery</button></div>
