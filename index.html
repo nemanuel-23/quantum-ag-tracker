@@ -129,7 +129,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--primary-light);box-sh
 const {useState,useEffect,useCallback,useMemo,createContext,useContext,useRef} = React;
 
 // ── APP VERSION ──
-const APP_VERSION = '4.1';
+const APP_VERSION = '5.0';
 
 // ── SUPABASE AUTH CONFIG ──
 const SB_ROW_ID = '277449c7-b587-4e4d-bca0-835cbce1771e';
@@ -233,31 +233,34 @@ const AuthContext = createContext();
 function useAuth(){return useContext(AuthContext);}
 
 // ── MASTER DATA ──
-const ALL_PRODUCTS = [
-  {id:"401-25",name:"401 - 2.5 gal",price:77},{id:"meltdown-25",name:"Meltdown - 2.5 gal",price:58},{id:"meltdown-tote",name:"Meltdown - Tote",price:55.5},
-  {id:"biocast-max-25",name:"BioCast Max - 2.5 gal",price:94.5},{id:"biocast-max-tote",name:"BioCast Max - Tote",price:92},
-  {id:"fullsun-25",name:"Full Sun - 2.5 gal",price:35.5},{id:"fullsun-tote",name:"Full Sun - Tote",price:33.5},
-  {id:"relaxrx-25",name:"Relax Rx - 2.5 gal",price:44},{id:"relaxrx-tote",name:"Relax Rx - Tote",price:41.5},
-  {id:"amino-25",name:"Amino - 2.5 gal",price:45.5},{id:"amino-tote",name:"Amino - Tote",price:43},
-  {id:"hf12-25",name:"HF12 - 2.5 gal",price:19},{id:"hf12-tote",name:"HF12 - Tote",price:17},
-  {id:"zinc9",name:"Zinc 9%",price:17.5},{id:"zinc9-tote",name:"Zinc 9% - Tote",price:15.5},{id:"zinc9-25",name:"Zinc 9% - 2.5 gal",price:17.5},
-  {id:"boron7-tote",name:"Boron 7% - Tote",price:11.5},{id:"boron7-25",name:"Boron 7% - 2.5 gal",price:13.5},
-  {id:"bioboost-corn",name:"BioBoost Corn",price:1047},{id:"bioboost-soy",name:"BioBoost Soybeans",price:541.5},
-  {id:"humical",name:"HumiCal",price:11.5},{id:"blg",name:"BLG",price:44},
-  {id:"defend-corn",name:"Defend 601 Corn",price:1681.88},{id:"defend-sb",name:"Defend 601 SB",price:598},
-  {id:"prime-25",name:"Prime - 2.5 gal",price:15.5},{id:"prime-tote",name:"Prime - Tote",price:13.5},
-  {id:"kace-25",name:"K ACE - 2.5 gal",price:11.25},{id:"kace-tote",name:"K ACE - Tote",price:7.75},
-  {id:"biocast-25",name:"BioCast - 2.5 gal",price:52},{id:"biocast-tote",name:"BioCast - Tote",price:52},
-  {id:"restock-25",name:"RepleNish - 2.5 gal",price:76},{id:"sweet",name:"Sweet",price:17.7},
-  {id:"nforce",name:"NForce",price:22.5},{id:"ntrust",name:"Ntrust",price:26},
-  {id:"cornworx",name:"CornWorX",price:36},{id:"soyworx",name:"SoyWorX",price:9},
-  {id:"advance",name:"Advance",price:24},{id:"caboom",name:"CaBoom",price:36},
-  {id:"seaamino",name:"SeaAmino",price:32},{id:"respite",name:"Respite",price:58},
-  {id:"fixate",name:"Fixate",price:58},{id:"synergy",name:"Synergy",price:10.5},
-  {id:"melted-manure",name:"Melted Manure",price:4.5},{id:"piksi",name:"PiKSi Dust",price:600}
+const PACKAGING_OPTIONS = ["2.5 Gal","Tote",""];
+const DEFAULT_PRODUCTS = [
+  {id:"401-25",name:"401",packaging:"2.5 Gal",price:77},{id:"meltdown-25",name:"Meltdown",packaging:"2.5 Gal",price:58},{id:"meltdown-tote",name:"Meltdown",packaging:"Tote",price:55.5},
+  {id:"biocast-max-25",name:"BioCast Max",packaging:"2.5 Gal",price:94.5},{id:"biocast-max-tote",name:"BioCast Max",packaging:"Tote",price:92},
+  {id:"fullsun-25",name:"Full Sun",packaging:"2.5 Gal",price:35.5},{id:"fullsun-tote",name:"Full Sun",packaging:"Tote",price:33.5},
+  {id:"relaxrx-25",name:"Relax Rx",packaging:"2.5 Gal",price:44},{id:"relaxrx-tote",name:"Relax Rx",packaging:"Tote",price:41.5},
+  {id:"amino-25",name:"Amino",packaging:"2.5 Gal",price:45.5},{id:"amino-tote",name:"Amino",packaging:"Tote",price:43},
+  {id:"hf12-25",name:"HF12",packaging:"2.5 Gal",price:19},{id:"hf12-tote",name:"HF12",packaging:"Tote",price:17},
+  {id:"zinc9",name:"Zinc 9%",packaging:"",price:17.5},{id:"zinc9-tote",name:"Zinc 9%",packaging:"Tote",price:15.5},{id:"zinc9-25",name:"Zinc 9%",packaging:"2.5 Gal",price:17.5},
+  {id:"boron7-tote",name:"Boron 7%",packaging:"Tote",price:11.5},{id:"boron7-25",name:"Boron 7%",packaging:"2.5 Gal",price:13.5},
+  {id:"bioboost-corn",name:"BioBoost Corn",packaging:"",price:1047},{id:"bioboost-soy",name:"BioBoost Soybeans",packaging:"",price:541.5},
+  {id:"humical",name:"HumiCal",packaging:"",price:11.5},{id:"blg",name:"BLG",packaging:"",price:44},
+  {id:"defend-corn",name:"Defend 601 Corn",packaging:"",price:1681.88},{id:"defend-sb",name:"Defend 601 SB",packaging:"",price:598},
+  {id:"prime-25",name:"Prime",packaging:"2.5 Gal",price:15.5},{id:"prime-tote",name:"Prime",packaging:"Tote",price:13.5},
+  {id:"kace-25",name:"K ACE",packaging:"2.5 Gal",price:11.25},{id:"kace-tote",name:"K ACE",packaging:"Tote",price:7.75},
+  {id:"biocast-25",name:"BioCast",packaging:"2.5 Gal",price:52},{id:"biocast-tote",name:"BioCast",packaging:"Tote",price:52},
+  {id:"restock-25",name:"RepleNish",packaging:"2.5 Gal",price:76},{id:"sweet",name:"Sweet",packaging:"",price:17.7},
+  {id:"nforce",name:"NForce",packaging:"",price:22.5},{id:"ntrust",name:"Ntrust",packaging:"",price:26},
+  {id:"cornworx",name:"CornWorX",packaging:"",price:36},{id:"soyworx",name:"SoyWorX",packaging:"",price:9},
+  {id:"advance",name:"Advance",packaging:"",price:24},{id:"caboom",name:"CaBoom",packaging:"",price:36},
+  {id:"seaamino",name:"SeaAmino",packaging:"",price:32},{id:"respite",name:"Respite",packaging:"",price:58},
+  {id:"fixate",name:"Fixate",packaging:"",price:58},{id:"synergy",name:"Synergy",packaging:"",price:10.5},
+  {id:"melted-manure",name:"Melted Manure",packaging:"",price:4.5},{id:"piksi",name:"PiKSi Dust",packaging:"",price:600}
 ];
+// Helper: display name includes packaging if set
+const productDisplayName = (p) => p.packaging ? `${p.name} - ${p.packaging}` : p.name;
 
-const ALL_CUSTOMERS = [
+const DEFAULT_CUSTOMERS = [
   "Beebe Seed Farms","Brad Ferguson","Brad Williams","Brent Hopkins","Brian Sanderson",
   "Brian Vech","Charles Emanuel & Sons","Chris Armstrong","Chris Kloke","Cliff Goff",
   "Cody Weitzenkamp","Dan Mensik","Dave Baumert","DJ Mottl","Eddie Ruskamp",
@@ -284,6 +287,8 @@ const getStatus = v => STATUS_OPTIONS.find(s=>s.value===v)||STATUS_OPTIONS[0];
 
 // ── INITIAL DATA ──
 const INITIAL_DATA = {
+  products: DEFAULT_PRODUCTS,
+  customers: DEFAULT_CUSTOMERS,
   inventory: {
     "401-25":{starting:327.5,additions:[]},"meltdown-25":{starting:265,additions:[]},"meltdown-tote":{starting:60,additions:[]},
     "biocast-max-25":{starting:360,additions:[]},"biocast-max-tote":{starting:2120,additions:[{date:"2025-12-01",qty:707,note:"Restock"}]},
@@ -433,6 +438,10 @@ function AppProvider({children}) {
         const parsed = JSON.parse(saved);
         if(!parsed.settings) parsed.settings = INITIAL_DATA.settings;
         if(!parsed.deliveryTickets) parsed.deliveryTickets = [];
+        if(!parsed.products) parsed.products = DEFAULT_PRODUCTS;
+        if(!parsed.customers) parsed.customers = DEFAULT_CUSTOMERS;
+        // Migrate: add packaging field to products that don't have it
+        parsed.products = parsed.products.map(p=>p.packaging!==undefined?p:{...p,packaging:DEFAULT_PRODUCTS.find(d=>d.id===p.id)?.packaging||''});
         return parsed;
       }catch(e){}
     }
@@ -471,6 +480,9 @@ function AppProvider({children}) {
           const merged={...d,...remote};
           merged.settings={...d.settings,...(remote.settings||{}),supabase:{url:SB_URL,anonKey:SB_ANON_KEY,enabled:true}};
           if(!merged.deliveryTickets) merged.deliveryTickets=[];
+          if(!merged.products) merged.products=DEFAULT_PRODUCTS;
+          if(!merged.customers) merged.customers=DEFAULT_CUSTOMERS;
+          merged.products=merged.products.map(p=>p.packaging!==undefined?p:{...p,packaging:DEFAULT_PRODUCTS.find(x=>x.id===p.id)?.packaging||''});
           return merged;
         });
       }
@@ -486,6 +498,9 @@ function AppProvider({children}) {
         setData(d=>{
           const merged={...d,...remote};
           merged.settings={...d.settings,...(remote.settings||{}),supabase:{url:SB_URL,anonKey:SB_ANON_KEY,enabled:true}};
+          if(!merged.products) merged.products=DEFAULT_PRODUCTS;
+          if(!merged.customers) merged.customers=DEFAULT_CUSTOMERS;
+          merged.products=merged.products.map(p=>p.packaging!==undefined?p:{...p,packaging:DEFAULT_PRODUCTS.find(x=>x.id===p.id)?.packaging||''});
           return merged;
         });
       }
@@ -509,6 +524,21 @@ function AppProvider({children}) {
   const deleteGroup=i=>{updateData(d=>({...d,customerGroups:d.customerGroups.filter((_,j)=>j!==i)}));};
   const updateSettings=s=>{updateData(d=>({...d,settings:{...d.settings,...s}}));};
   const saveDeliveryTicket=t=>{updateData(d=>({...d,deliveryTickets:[...d.deliveryTickets,{...t,id:uid(),savedAt:today()}]}));};
+  // Product CRUD
+  const addProduct=p=>{updateData(d=>({...d,products:[...d.products,p]}));showToast('Product added');};
+  const updateProduct=(id,u)=>{updateData(d=>({...d,products:d.products.map(p=>p.id===id?{...p,...u}:p)}));};
+  const deleteProduct=id=>{updateData(d=>({...d,products:d.products.filter(p=>p.id!==id)}));showToast('Product deleted');};
+  // Customer CRUD
+  const addCustomer=name=>{updateData(d=>({...d,customers:[...d.customers,name].sort()}));showToast('Customer added');};
+  const updateCustomer=(oldName,newName)=>{updateData(d=>{
+    const customers=d.customers.map(c=>c===oldName?newName:c).sort();
+    const orders=d.orders.map(o=>o.customer===oldName?{...o,customer:newName}:o);
+    const deliveries=d.deliveries.map(dl=>dl.customer===oldName?{...dl,customer:newName}:dl);
+    const deliveryTickets=d.deliveryTickets.map(t=>t.customer===oldName?{...t,customer:newName}:t);
+    const customerGroups=d.customerGroups.map(g=>({...g,members:g.members.map(m=>m===oldName?newName:m)}));
+    return{...d,customers,orders,deliveries,deliveryTickets,customerGroups};
+  });showToast('Customer updated');};
+  const deleteCustomer=name=>{updateData(d=>({...d,customers:d.customers.filter(c=>c!==name)}));showToast('Customer removed');};
 
   const fyStart = data.settings?.fiscalYearStart||{month:1,day:1};
   const fyLabel = data.settings?.fiscalYearLabel||'end';
@@ -520,17 +550,20 @@ function AppProvider({children}) {
     return data.orders.filter(o=>getFiscalYear(o.date,fyStart,fyLabel)===activeYear);
   },[data.orders,activeYear,fyStart,fyLabel]);
 
+  const allProducts = data.products||DEFAULT_PRODUCTS;
+  const allCustomers = data.customers||DEFAULT_CUSTOMERS;
+
   const activeProducts = useMemo(()=>{
     const used = new Set();
     Object.keys(data.inventory).forEach(pid=>{const inv=data.inventory[pid];if(inv.starting>0||inv.additions.length>0)used.add(pid);});
     data.orders.forEach(o=>Object.keys(o.products).forEach(pid=>{if(o.products[pid]>0)used.add(pid);}));
-    return ALL_PRODUCTS.filter(p=>used.has(p.id));
-  },[data]);
+    return allProducts.filter(p=>used.has(p.id));
+  },[data,allProducts]);
 
   const activeCustomers = useMemo(()=>{
     const used=new Set(data.orders.map(o=>o.customer));
-    return ALL_CUSTOMERS.filter(c=>used.has(c));
-  },[data]);
+    return allCustomers.filter(c=>used.has(c));
+  },[data,allCustomers]);
 
   const getProductTotalSold=useCallback(pid=>data.orders.reduce((s,o)=>s+(o.products[pid]||0),0),[data.orders]);
   const getProductDelivered=useCallback(pid=>data.deliveries.reduce((s,d)=>s+(d.products?.[pid]||0),0),[data.deliveries]);
@@ -554,7 +587,7 @@ function AppProvider({children}) {
   const exportData=()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='quantum-ag-backup-'+today()+'.json';a.click();URL.revokeObjectURL(u);showToast('Exported');};
   const importData=json=>{try{setData(JSON.parse(json));showToast('Imported');}catch(e){showToast('Invalid file');}};
 
-  return <AppContext.Provider value={{data,setData:updateData,activeProducts,activeCustomers,updateInventory,addInventory,addOrder,updateOrder,deleteOrder,addDelivery,updateDelivery,addGroup,updateGroup,deleteGroup,updateSettings,saveDeliveryTicket,getProductTotalSold,getProductDelivered,getProductAvailable,getProductSoldNotDelivered,getOrderDelivered,getOrderDeliveryCount,isOrderFullyDelivered,exportData,importData,showToast,toast,sbConnected,activeYear,setActiveYear,availableYears,visibleYears,archivedYears,yearOrders,fyStart,fyLabel}}>{children}</AppContext.Provider>;
+  return <AppContext.Provider value={{data,setData:updateData,allProducts,allCustomers,activeProducts,activeCustomers,updateInventory,addInventory,addOrder,updateOrder,deleteOrder,addDelivery,updateDelivery,addGroup,updateGroup,deleteGroup,updateSettings,saveDeliveryTicket,addProduct,updateProduct,deleteProduct,addCustomer,updateCustomer,deleteCustomer,getProductTotalSold,getProductDelivered,getProductAvailable,getProductSoldNotDelivered,getOrderDelivered,getOrderDeliveryCount,isOrderFullyDelivered,exportData,importData,showToast,toast,sbConnected,activeYear,setActiveYear,availableYears,visibleYears,archivedYears,yearOrders,fyStart,fyLabel}}>{children}</AppContext.Provider>;
 }
 
 // ── MODAL ──
@@ -618,7 +651,7 @@ function Dashboard() {
                   const isExpanded=expandedProduct===p.id;
                   return <React.Fragment key={p.id}>
                     <tr className="expand-row" onClick={()=>setExpandedProduct(isExpanded?null:p.id)}>
-                      <td style={{fontWeight:500}}><Icon name={isExpanded?'down':'chevron'} size={14} style={{marginRight:6}}/>{p.name}</td>
+                      <td style={{fontWeight:500}}><Icon name={isExpanded?'down':'chevron'} size={14} style={{marginRight:6}}/>{productDisplayName(p)}</td>
                       <td className="inv-cell negative">{fmt(avail)}</td>
                       <td className="inv-cell negative">{fmt(Math.abs(avail))} needed</td>
                       <td className="inv-cell">{fmt(getProductTotalSold(p.id))}</td>
@@ -653,7 +686,7 @@ function Dashboard() {
               {productsAvail.sort((a,b)=>getProductAvailable(b.id)-getProductAvailable(a.id)).map(p=>{
                 const inv=data.inventory[p.id]||{starting:0,additions:[]};
                 const added=inv.additions.reduce((s,a)=>s+a.qty,0);
-                return <tr key={p.id}><td style={{fontWeight:500}}>{p.name}</td><td className="inv-cell">{fmt(inv.starting)}</td><td className="inv-cell positive">{added>0?'+'+fmt(added):'—'}</td><td className="inv-cell">{fmt(getProductTotalSold(p.id))}</td><td className="inv-cell positive" style={{fontWeight:700}}>{fmt(getProductAvailable(p.id))}</td></tr>;
+                return <tr key={p.id}><td style={{fontWeight:500}}>{productDisplayName(p)}</td><td className="inv-cell">{fmt(inv.starting)}</td><td className="inv-cell positive">{added>0?'+'+fmt(added):'—'}</td><td className="inv-cell">{fmt(getProductTotalSold(p.id))}</td><td className="inv-cell positive" style={{fontWeight:700}}>{fmt(getProductAvailable(p.id))}</td></tr>;
               })}
             </tbody>
           </table>
@@ -722,7 +755,7 @@ function Dashboard() {
 // ── INVENTORY SCREEN ──
 // ══════════════════════════
 function InventoryScreen() {
-  const {data,activeProducts,updateInventory,addInventory,getProductTotalSold,getProductAvailable,getProductSoldNotDelivered,getProductDelivered,showToast} = useApp();
+  const {data,allProducts,activeProducts,updateInventory,addInventory,getProductTotalSold,getProductAvailable,getProductSoldNotDelivered,getProductDelivered,showToast} = useApp();
   const [addModal,setAddModal] = useState(null);
   const [addDate,setAddDate] = useState(today());
   const [addQty,setAddQty] = useState('');
@@ -774,7 +807,7 @@ function InventoryScreen() {
         <thead><tr><SortTh label="Product" colKey="name" sortKey={invSK} sortDir={invSD} onSort={invToggle}/><SortTh label="Starting" colKey="starting" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/><SortTh label="Added" colKey="added" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/><SortTh label="Total Sold" colKey="sold" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/><SortTh label="Delivered" colKey="delivered" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/><SortTh label="Sold, Not Delivered" colKey="snd" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/><SortTh label="Available" colKey="avail" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/><th></th></tr></thead>
         <tbody>{invRows.map(p=>{
           return <tr key={p.id}>
-            <td style={{fontWeight:500}}>{p.name}</td>
+            <td style={{fontWeight:500}}>{productDisplayName(p)}</td>
             <td className="inv-cell" style={{cursor:'pointer',textDecoration:'underline dotted'}} onClick={()=>{setEditModal(p.id);setEditVal(p.inv.starting);}}>{fmt(p.inv.starting)}</td>
             <td className="inv-cell positive">{p.added>0?'+'+fmt(p.added):'—'}{p.inv.additions.length>0&&<div style={{fontSize:10,color:'#94a3b8'}}>{p.inv.additions.length} addition{p.inv.additions.length>1?'s':''}</div>}</td>
             <td className="inv-cell">{fmt(p.sold)}</td>
@@ -787,7 +820,7 @@ function InventoryScreen() {
       </table></div></div>
 
       {/* Single product add modal */}
-      {addModal&&<Modal title={`Add Inventory — ${ALL_PRODUCTS.find(p=>p.id===addModal)?.name}`} onClose={()=>setAddModal(null)}>
+      {addModal&&<Modal title={`Add Inventory — ${productDisplayName(allProducts.find(p=>p.id===addModal)||{name:addModal})}`} onClose={()=>setAddModal(null)}>
         <div className="modal-body">
           <div className="form-group"><label>Date</label><input type="date" value={addDate} onChange={e=>setAddDate(e.target.value)}/></div>
           <div className="form-group"><label>Quantity</label><input type="number" step="0.1" placeholder="Enter quantity" value={addQty} onChange={e=>setAddQty(e.target.value)}/></div>
@@ -823,7 +856,7 @@ function InventoryScreen() {
                   const sel=!!bulkSelected[p.id];
                   return <tr key={p.id} style={{background:sel?'var(--primary-bg)':'transparent',cursor:'pointer'}} onClick={()=>toggleBulkProduct(p.id)}>
                     <td style={{textAlign:'center'}}><input type="checkbox" checked={sel} onChange={()=>toggleBulkProduct(p.id)} onClick={e=>e.stopPropagation()} style={{width:'auto',cursor:'pointer'}}/></td>
-                    <td style={{fontWeight:500}}>{p.name}</td>
+                    <td style={{fontWeight:500}}>{productDisplayName(p)}</td>
                     <td className={`inv-cell ${avail<0?'negative':'positive'}`} style={{fontWeight:600}}>{fmt(avail)}</td>
                     <td onClick={e=>e.stopPropagation()}><input type="number" step="0.1" placeholder="0" disabled={!sel} value={bulkQtys[p.id]||''} onChange={e=>setBulkQty(p.id,e.target.value)} style={{opacity:sel?1:0.4,textAlign:'right',padding:'5px 8px'}}/></td>
                   </tr>;
@@ -839,7 +872,7 @@ function InventoryScreen() {
       </div>}
 
       {/* Edit starting inventory modal */}
-      {editModal&&<Modal title={`Edit Starting Inventory — ${ALL_PRODUCTS.find(p=>p.id===editModal)?.name}`} onClose={()=>setEditModal(null)}>
+      {editModal&&<Modal title={`Edit Starting Inventory — ${productDisplayName(allProducts.find(p=>p.id===editModal)||{name:editModal})}`} onClose={()=>setEditModal(null)}>
         <div className="modal-body"><div className="form-group"><label>Starting Inventory</label><input type="number" step="0.1" value={editVal} onChange={e=>setEditVal(e.target.value)}/></div></div>
         <div className="modal-footer"><button className="btn btn-secondary" onClick={()=>setEditModal(null)}>Cancel</button><button className="btn btn-primary" onClick={()=>{updateInventory(editModal,'starting',parseFloat(editVal)||0);setEditModal(null);showToast('Updated');}}>Save</button></div>
       </Modal>}
@@ -851,7 +884,7 @@ function InventoryScreen() {
 // ── ORDERS SCREEN ──
 // ══════════════════════
 function OrdersScreen({onNavigate}) {
-  const {data,yearOrders,activeYear,setActiveYear,visibleYears,archivedYears,fyStart,fyLabel,deleteOrder,activeProducts} = useApp();
+  const {data,allProducts,yearOrders,activeYear,setActiveYear,visibleYears,archivedYears,fyStart,fyLabel,deleteOrder,activeProducts} = useApp();
   const [showAdd,setShowAdd] = useState(false);
   const [filter,setFilter] = useState('all');
   const [search,setSearch] = useState('');
@@ -876,8 +909,8 @@ function OrdersScreen({onNavigate}) {
   const spreadsheetProducts = useMemo(()=>{
     const used=new Set();
     yearOrders.forEach(o=>Object.keys(o.products).forEach(pid=>{if(o.products[pid]>0)used.add(pid);}));
-    return ALL_PRODUCTS.filter(p=>used.has(p.id));
-  },[yearOrders]);
+    return allProducts.filter(p=>used.has(p.id));
+  },[yearOrders,allProducts]);
 
   // Group orders by customer for spreadsheet view, aggregate if multiple orders per customer
   const spreadsheetRows = useMemo(()=>{
@@ -955,7 +988,7 @@ function OrdersScreen({onNavigate}) {
               <tr style={{position:'sticky',top:0,zIndex:2,background:'#f8fafc'}}>
                 <SortTh label="Customer" colKey="customer" sortKey={mSK} sortDir={mSD} onSort={mToggle} style={{position:'sticky',left:0,background:'#f8fafc',zIndex:3,whiteSpace:'nowrap'}}/>
                 <SortTh label="Status" colKey="status" sortKey={mSK} sortDir={mSD} onSort={mToggle} style={{textAlign:'center'}}/>
-                {spreadsheetProducts.map(p=><SortTh key={p.id} label={p.name} colKey={p.id} sortKey={mSK} sortDir={mSD} onSort={mToggle} style={{textAlign:'right',fontSize:10,padding:'8px 6px',whiteSpace:'nowrap'}}/>)}
+                {spreadsheetProducts.map(p=><SortTh key={p.id} label={productDisplayName(p)} colKey={p.id} sortKey={mSK} sortDir={mSD} onSort={mToggle} style={{textAlign:'right',fontSize:10,padding:'8px 6px',whiteSpace:'nowrap'}}/>)}
               </tr>
             </thead>
             <tbody>
@@ -983,7 +1016,7 @@ function OrdersScreen({onNavigate}) {
 }
 
 function OrderModal({order,onClose}) {
-  const {addOrder,updateOrder,showToast} = useApp();
+  const {allProducts,allCustomers,addOrder,updateOrder,addCustomer,showToast} = useApp();
   const [customer,setCustomer] = useState(order?.customer||'');
   const [date,setDate] = useState(order?.date||today());
   const [status,setStatus] = useState(order?.status||'pending');
@@ -991,14 +1024,18 @@ function OrderModal({order,onClose}) {
   const [products,setProducts] = useState(order?.products||{});
   const [custSearch,setCustSearch] = useState('');
   const [showAllProducts,setShowAllProducts] = useState(false);
-  const filteredCust=ALL_CUSTOMERS.filter(c=>c.toLowerCase().includes(custSearch.toLowerCase()));
+  const [showAddCust,setShowAddCust] = useState(false);
+  const [newCustName,setNewCustName] = useState('');
+  const filteredCust=allCustomers.filter(c=>c.toLowerCase().includes(custSearch.toLowerCase()));
   const setProduct=(pid,val)=>{const v=parseFloat(val)||0;setProducts(p=>v>0?{...p,[pid]:v}:Object.fromEntries(Object.entries(p).filter(([k])=>k!==pid)));};
   const save=()=>{if(!customer){alert('Select a customer');return;}if(Object.keys(products).length===0){alert('Add at least one product');return;}if(order){updateOrder(order.id,{customer,date,status,invoiced,products});showToast('Order updated');}else addOrder({customer,date,status,invoiced,products});onClose();};
   return <Modal title={order?'Edit Order':'New Order'} onClose={onClose} wide>
     <div className="modal-body">
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
         <div className="form-group"><label>Customer</label>{order?<input value={customer} readOnly style={{background:'#f8fafc'}}/>:<div><input placeholder="Search customer..." value={custSearch} onChange={e=>{setCustSearch(e.target.value);if(!customer)setCustomer('');}}/>
-          {custSearch&&!customer&&<div style={{border:'1px solid var(--border)',borderRadius:6,maxHeight:150,overflowY:'auto',marginTop:4}}>{filteredCust.slice(0,10).map(c=><div key={c} style={{padding:'6px 12px',cursor:'pointer',fontSize:13}} onClick={()=>{setCustomer(c);setCustSearch(c);}} onMouseEnter={e=>e.target.style.background='#f1f5f9'} onMouseLeave={e=>e.target.style.background=''}>{c}</div>)}</div>}
+          {custSearch&&!customer&&<div style={{border:'1px solid var(--border)',borderRadius:6,maxHeight:150,overflowY:'auto',marginTop:4}}>{filteredCust.slice(0,10).map(c=><div key={c} style={{padding:'6px 12px',cursor:'pointer',fontSize:13}} onClick={()=>{setCustomer(c);setCustSearch(c);}} onMouseEnter={e=>e.target.style.background='#f1f5f9'} onMouseLeave={e=>e.target.style.background=''}>{c}</div>)}
+            {filteredCust.length===0&&custSearch.length>1&&<div style={{padding:'6px 12px',cursor:'pointer',fontSize:13,color:'var(--primary)',fontWeight:500}} onClick={()=>{addCustomer(custSearch);setCustomer(custSearch);setCustSearch(custSearch);}} onMouseEnter={e=>e.target.style.background='var(--primary-bg)'} onMouseLeave={e=>e.target.style.background=''}>+ Add "{custSearch}" as new customer</div>}
+          </div>}
         </div>}</div>
         <div className="form-group"><label>Order Date</label><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></div>
         <div className="form-group"><label>Status</label><select value={status} onChange={e=>setStatus(e.target.value)}>{STATUS_OPTIONS.map(s=><option key={s.value} value={s.value}>{s.label}</option>)}</select></div>
@@ -1007,17 +1044,17 @@ function OrderModal({order,onClose}) {
       <h4 style={{fontSize:14,fontWeight:600,margin:'16px 0 8px'}}>Products & Quantities</h4>
       {order&&<div style={{marginBottom:8}}>
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:8}}>
-          {ALL_PRODUCTS.filter(p=>products[p.id]>0).map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontSize:12,flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.name}</span><input type="number" step="0.1" style={{width:80}} placeholder="0" value={products[p.id]||''} onChange={e=>setProduct(p.id,e.target.value)}/></div>)}
+          {allProducts.filter(p=>products[p.id]>0).map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontSize:12,flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{productDisplayName(p)}</span><input type="number" step="0.1" style={{width:80}} placeholder="0" value={products[p.id]||''} onChange={e=>setProduct(p.id,e.target.value)}/></div>)}
         </div>
         {showAllProducts?<div style={{marginTop:8,paddingTop:8,borderTop:'1px dashed var(--border)'}}>
           <p style={{fontSize:11,color:'var(--text-secondary)',marginBottom:6}}>Add more products:</p>
           <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:8}}>
-            {ALL_PRODUCTS.filter(p=>!products[p.id]||products[p.id]<=0).map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontSize:12,flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:'var(--text-secondary)'}}>{p.name}</span><input type="number" step="0.1" style={{width:80}} placeholder="0" value={products[p.id]||''} onChange={e=>setProduct(p.id,e.target.value)}/></div>)}
+            {allProducts.filter(p=>!products[p.id]||products[p.id]<=0).map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontSize:12,flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:'var(--text-secondary)'}}>{productDisplayName(p)}</span><input type="number" step="0.1" style={{width:80}} placeholder="0" value={products[p.id]||''} onChange={e=>setProduct(p.id,e.target.value)}/></div>)}
           </div>
         </div>:<button className="btn btn-sm btn-secondary" style={{marginTop:8}} onClick={()=>setShowAllProducts(true)}><Icon name="plus" size={14}/>Add More Products</button>}
       </div>}
       {!order&&<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:8}}>
-        {ALL_PRODUCTS.map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontSize:12,flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{p.name}</span><input type="number" step="0.1" style={{width:80}} placeholder="0" value={products[p.id]||''} onChange={e=>setProduct(p.id,e.target.value)}/></div>)}
+        {allProducts.map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontSize:12,flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{productDisplayName(p)}</span><input type="number" step="0.1" style={{width:80}} placeholder="0" value={products[p.id]||''} onChange={e=>setProduct(p.id,e.target.value)}/></div>)}
       </div>}
     </div>
     <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={save}>{order?'Save Changes':'Create Order'}</button></div>
@@ -1028,7 +1065,9 @@ function OrderModal({order,onClose}) {
 // ── CUSTOMERS SCREEN ──
 // ══════════════════════════
 function CustomersScreen({onNavigate}) {
-  const {data,activeCustomers} = useApp();
+  const {data,allProducts,allCustomers,activeCustomers,addCustomer,showToast} = useApp();
+  const [showAddCustomer,setShowAddCustomer] = useState(false);
+  const [newCustName,setNewCustName] = useState('');
   const [search,setSearch] = useState('');
   const {sortKey:cSK,sortDir:cSD,toggleSort:cToggle,sortFn:cSort} = useSort('name');
   const customerData=useMemo(()=>activeCustomers.map(name=>{
@@ -1045,12 +1084,21 @@ function CustomersScreen({onNavigate}) {
   }),[data.customerGroups,sortedCustomers]);
 
   return <div className="fade-in">
-    <div className="page-header"><h2>Customers</h2><p>View customer orders and group totals</p></div>
+    <div className="page-header" style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+      <div><h2>Customers</h2><p>View customer orders and group totals</p></div>
+      <button className="btn btn-primary" onClick={()=>{setShowAddCustomer(true);setNewCustName('');}}><Icon name="plus" size={16}/>Add Customer</button>
+    </div>
+    {showAddCustomer&&<Modal title="Add New Customer" onClose={()=>setShowAddCustomer(false)}>
+      <div className="modal-body"><div className="form-group"><label>Customer Name</label><input value={newCustName} onChange={e=>setNewCustName(e.target.value)} placeholder="Enter customer name"/></div>
+        {newCustName&&allCustomers.includes(newCustName)&&<p style={{fontSize:12,color:'var(--danger)'}}>Customer already exists</p>}
+      </div>
+      <div className="modal-footer"><button className="btn btn-secondary" onClick={()=>setShowAddCustomer(false)}>Cancel</button><button className="btn btn-primary" disabled={!newCustName.trim()||allCustomers.includes(newCustName)} onClick={()=>{addCustomer(newCustName.trim());setShowAddCustomer(false);}}>Add Customer</button></div>
+    </Modal>}
     <div className="card" style={{padding:'12px 16px'}}><div className="search-box"><Icon name="search"/><input placeholder="Search customers..." value={search} onChange={e=>setSearch(e.target.value)}/></div></div>
     {groupData.map(g=><div key={g.name} className="card"><div className="card-header"><h3 style={{color:'var(--primary)'}}>{g.name} Group</h3><span className="tag">{g.members.length} members</span></div>
       <table><thead><tr><SortTh label="Customer" colKey="name" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Orders" colKey="orders" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Latest Date" colKey="latest" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Status" colKey="status" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><th></th></tr></thead><tbody>
         {g.members.map(m=>{const st=m.latest?getStatus(m.latest.status):getStatus('pending');return <tr key={m.name} style={{cursor:'pointer'}} onClick={()=>onNavigate('customer-detail',m.name)}><td style={{fontWeight:500}}>{m.name}</td><td>{m.orders.length}</td><td>{m.latest?fmtDate(m.latest.date):'—'}</td><td><span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span></td><td style={{textAlign:'right'}}><Icon name="chevron" size={16}/></td></tr>;})}
-        <tr className="group-row"><td>{g.name} Total</td><td>{g.members.reduce((s,m)=>s+m.orders.length,0)}</td><td colSpan="3">{Object.entries(g.totalProducts).filter(([,v])=>v>0).slice(0,5).map(([pid,qty])=>{const p=ALL_PRODUCTS.find(x=>x.id===pid);return <span key={pid} className="tag" style={{marginRight:4}}>{p?.name}: {fmt(qty)}</span>;})}</td></tr>
+        <tr className="group-row"><td>{g.name} Total</td><td>{g.members.reduce((s,m)=>s+m.orders.length,0)}</td><td colSpan="3">{Object.entries(g.totalProducts).filter(([,v])=>v>0).slice(0,5).map(([pid,qty])=>{const p=allProducts.find(x=>x.id===pid);return <span key={pid} className="tag" style={{marginRight:4}}>{productDisplayName(p||{name:pid})}: {fmt(qty)}</span>;})}</td></tr>
       </tbody></table>
     </div>)}
     <div className="card"><div className="card-header"><h3>All Customers</h3></div><table><thead><tr><SortTh label="Customer" colKey="name" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Group" colKey="group" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Orders" colKey="orders" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Latest" colKey="latest" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Status" colKey="status" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><th></th></tr></thead><tbody>
@@ -1060,20 +1108,20 @@ function CustomersScreen({onNavigate}) {
 }
 
 function CustomerDetail({customerName,onBack}) {
-  const {data,updateOrder} = useApp();
+  const {data,allProducts,updateOrder} = useApp();
   const orders=data.orders.filter(o=>o.customer===customerName);const group=data.customerGroups.find(g=>g.members.includes(customerName));const deliveries=data.deliveries.filter(d=>d.customer===customerName);
   const tp={};orders.forEach(o=>{Object.entries(o.products).forEach(([pid,qty])=>{tp[pid]=(tp[pid]||0)+qty;});});
-  const usedProducts=ALL_PRODUCTS.filter(p=>tp[p.id]>0);
+  const usedProducts=allProducts.filter(p=>tp[p.id]>0);
   return <div className="fade-in">
     <div className="page-header" style={{display:'flex',alignItems:'center',gap:12}}><button className="btn-icon" onClick={onBack}><Icon name="back"/></button><div><h2>{customerName}</h2><p>{group?<span className="tag" style={{background:'var(--primary-bg)',color:'var(--primary)'}}>{group.name} Group</span>:null} {orders.length} order{orders.length!==1?'s':''}</p></div></div>
     <div className="card"><div className="card-header"><h3>Orders</h3></div><div className="inv-table-wrap"><table>
-      <thead><tr><th>Date</th><th>Status</th>{usedProducts.map(p=><th key={p.id} className="product-col" style={{textAlign:'right',fontSize:10}}>{p.name}</th>)}</tr></thead>
+      <thead><tr><th>Date</th><th>Status</th>{usedProducts.map(p=><th key={p.id} className="product-col" style={{textAlign:'right',fontSize:10}}>{productDisplayName(p)}</th>)}</tr></thead>
       <tbody>{orders.map(o=><tr key={o.id}><td>{fmtDate(o.date)}</td><td><select value={o.status} onChange={e=>updateOrder(o.id,{status:e.target.value})} style={{width:'auto',padding:'3px 6px',fontSize:11}}>{STATUS_OPTIONS.map(s=><option key={s.value} value={s.value}>{s.label}</option>)}</select></td>{usedProducts.map(p=><td key={p.id} className="inv-cell">{o.products[p.id]?fmt(o.products[p.id]):'—'}</td>)}</tr>)}
         <tr style={{fontWeight:700,background:'#f0f9ff'}}><td colSpan="2">Customer Total</td>{usedProducts.map(p=><td key={p.id} className="inv-cell" style={{fontWeight:700}}>{tp[p.id]?fmt(tp[p.id]):'—'}</td>)}</tr>
       </tbody>
     </table></div></div>
     {deliveries.length>0&&<div className="card"><div className="card-header"><h3>Delivery History</h3></div><table><thead><tr><th>Date</th><th>Products</th><th>Pumps Out</th><th>Totes</th><th>Attachments</th></tr></thead><tbody>
-      {deliveries.map(d=><tr key={d.id}><td>{fmtDate(d.date)}</td><td>{Object.entries(d.products||{}).filter(([,v])=>v>0).map(([pid,qty])=>{const p=ALL_PRODUCTS.find(x=>x.id===pid);return <span key={pid} className="tag" style={{marginRight:4}}>{p?.name}: {fmt(qty)}</span>;})}</td><td>{d.pumpsOut||'—'}{d.pumpsReturnDate?` (return: ${fmtDate(d.pumpsReturnDate)})`:''}</td><td>{d.totes||'—'}{d.totesReturned?' (returned)':d.totes?' (out)':''}</td><td>{(d.attachments||[]).length>0?<span className="tag">{d.attachments.length} file{d.attachments.length>1?'s':''}</span>:'—'}</td></tr>)}
+      {deliveries.map(d=><tr key={d.id}><td>{fmtDate(d.date)}</td><td>{Object.entries(d.products||{}).filter(([,v])=>v>0).map(([pid,qty])=>{const p=allProducts.find(x=>x.id===pid);return <span key={pid} className="tag" style={{marginRight:4}}>{productDisplayName(p||{name:pid})}: {fmt(qty)}</span>;})}</td><td>{d.pumpsOut||'—'}{d.pumpsReturnDate?` (return: ${fmtDate(d.pumpsReturnDate)})`:''}</td><td>{d.totes||'—'}{d.totesReturned?' (returned)':d.totes?' (out)':''}</td><td>{(d.attachments||[]).length>0?<span className="tag">{d.attachments.length} file{d.attachments.length>1?'s':''}</span>:'—'}</td></tr>)}
     </tbody></table></div>}
   </div>;
 }
@@ -1082,7 +1130,7 @@ function CustomerDetail({customerName,onBack}) {
 // ── DELIVERIES SCREEN ──
 // ══════════════════════════
 function DeliveriesScreen({onNavigate}) {
-  const {data,updateDelivery,showToast} = useApp();
+  const {data,allProducts,updateDelivery,showToast} = useApp();
   const [showNew,setShowNew] = useState(false);
   const [showTicket,setShowTicket] = useState(null);
   const [tab,setTab] = useState('deliveries');
@@ -1115,7 +1163,7 @@ function DeliveriesScreen({onNavigate}) {
         const delIdx=data.deliveries.filter(x=>x.orderId===d.orderId).findIndex(x=>x.id===d.id)+1;
         return <tr key={d.id}>
         <td style={{fontWeight:500}}>{d.customer}{delCount>1&&<span className="tag" style={{marginLeft:6,fontSize:10}}>#{delIdx} of {delCount}</span>}</td><td>{fmtDate(d.date)}</td>
-        <td>{Object.entries(d.products||{}).filter(([,v])=>v>0).slice(0,3).map(([pid,qty])=>{const p=ALL_PRODUCTS.find(x=>x.id===pid);return <span key={pid} className="tag" style={{marginRight:4}}>{p?.name?.split('-')[0]?.trim()}: {fmt(qty)}</span>;})}</td>
+        <td>{Object.entries(d.products||{}).filter(([,v])=>v>0).slice(0,3).map(([pid,qty])=>{const p=allProducts.find(x=>x.id===pid);return <span key={pid} className="tag" style={{marginRight:4}}>{p?productDisplayName(p):pid}: {fmt(qty)}</span>;})}</td>
         <td>{d.pumpsOut||'—'}</td><td>{d.totes||'—'}{d.totesReturned?' (in)':''}</td>
         <td>{(d.attachments||[]).length>0?<span className="tag">{d.attachments.length}</span>:'—'}</td>
         <td><button className="btn btn-sm btn-secondary" onClick={()=>setShowTicket(d)}><Icon name="printer" size={14}/>Ticket</button></td>
@@ -1142,7 +1190,7 @@ function DeliveriesScreen({onNavigate}) {
 // ── NEW DELIVERY WITH PHOTO CAPTURE ──
 // ══════════════════════════════════════
 function NewDeliveryModal({onClose}) {
-  const {data,addDelivery,updateOrder,showToast,saveDeliveryTicket,getOrderDelivered,getOrderDeliveryCount,isOrderFullyDelivered} = useApp();
+  const {data,allProducts,addDelivery,updateOrder,showToast,saveDeliveryTicket,getOrderDelivered,getOrderDeliveryCount,isOrderFullyDelivered} = useApp();
   const [mode,setMode] = useState('individual');
   const [selectedOrder,setSelectedOrder] = useState('');
   const [selectedGroup,setSelectedGroup] = useState('');
@@ -1341,13 +1389,13 @@ function NewDeliveryModal({onClose}) {
         <h4 style={{fontSize:14,fontWeight:600,margin:'16px 0 8px'}}>{mode==='group'?'Combined Products':'Products to Deliver'}</h4>
         <table style={{fontSize:13}}><thead><tr><th style={{width:30,padding:'6px 8px'}}></th><th style={{textAlign:'left'}}>Product</th>{mode==='individual'&&<th style={{textAlign:'right',width:70}}>Ordered</th>}{mode==='individual'&&<th style={{textAlign:'right',width:90}}>Previously Delivered</th>}<th style={{textAlign:'right',width:90}}>Remaining</th><th style={{textAlign:'right',width:100}}>Deliver Now</th></tr></thead><tbody>
           {Object.entries(mode==='individual'&&selectedOrderObj?selectedOrderObj.products:products).filter(([,v])=>v>0).map(([pid,orderedQty])=>{
-            const p=ALL_PRODUCTS.find(x=>x.id===pid);
+            const p=allProducts.find(x=>x.id===pid);
             const prevDel=mode==='individual'&&selectedOrderObj?(getOrderDelivered(selectedOrderObj.id)[pid]||0):0;
             const remaining=mode==='individual'?Math.max(0,orderedQty-prevDel):(products[pid]||0);
             const included=includedProducts[pid]||false;
             return <tr key={pid} style={{opacity:included?1:0.4}}>
               <td style={{padding:'6px 8px'}}><input type="checkbox" checked={included} onChange={()=>toggleProduct(pid)} style={{width:'auto'}}/></td>
-              <td style={{fontWeight:500}}>{p?.name}</td>
+              <td style={{fontWeight:500}}>{productDisplayName(p||{name:pid})}</td>
               {mode==='individual'&&<td className="inv-cell">{fmt(orderedQty)}</td>}
               {mode==='individual'&&<td className="inv-cell" style={{color:prevDel>0?'var(--primary)':'var(--text-secondary)'}}>{fmt(prevDel)}</td>}
               <td className="inv-cell" style={{fontWeight:600,color:remaining>0?'var(--warning)':'var(--success)'}}>{fmt(remaining)}</td>
@@ -1397,6 +1445,7 @@ function NewDeliveryModal({onClose}) {
 // ── DELIVERY TICKET ──
 // ══════════════════════════
 function DeliveryTicketModal({delivery,onClose}) {
+  const {allProducts} = useApp();
   const ticketRef=useRef();
   const handlePrint=()=>{
     const content=ticketRef.current.innerHTML;
@@ -1416,7 +1465,7 @@ function DeliveryTicketModal({delivery,onClose}) {
         {delivery.totes>0&&<p style={{fontSize:14}}><strong>Totes:</strong> {delivery.totes}</p>}
       </div>
       {productEntries.length>0&&<table><thead><tr><th>Product</th><th style={{textAlign:'right'}}>Quantity</th></tr></thead><tbody>
-        {productEntries.map(([pid,qty])=>{const p=ALL_PRODUCTS.find(x=>x.id===pid);return <tr key={pid}><td>{p?.name||pid}</td><td style={{textAlign:'right',fontWeight:600}}>{fmt(qty)}</td></tr>;})}
+        {productEntries.map(([pid,qty])=>{const p=allProducts.find(x=>x.id===pid);return <tr key={pid}><td>{productDisplayName(p||{name:pid})}</td><td style={{textAlign:'right',fontWeight:600}}>{fmt(qty)}</td></tr>;})}
       </tbody></table>}
       {atts.length>0&&<div><h4 style={{fontSize:13,fontWeight:600,margin:'16px 0 8px'}}>Attached Photos/Video</h4><div className="photos" style={{display:'flex',flexWrap:'wrap',gap:8}}>
         {atts.filter(a=>a.type==='photo').map((a,i)=><img key={i} src={a.data} style={{maxWidth:200,borderRadius:4}}/>)}
@@ -1435,9 +1484,15 @@ function DeliveryTicketModal({delivery,onClose}) {
 // ── SETTINGS SCREEN ──
 // ══════════════════════════
 function SettingsScreen() {
-  const {data,addGroup,updateGroup,deleteGroup,updateSettings,exportData,importData,showToast,setData,sbConnected,archivedYears,availableYears} = useApp();
+  const {data,allProducts,allCustomers,addGroup,updateGroup,deleteGroup,updateSettings,addProduct,updateProduct,deleteProduct,addCustomer,updateCustomer,deleteCustomer,exportData,importData,showToast,setData,sbConnected,archivedYears,availableYears} = useApp();
   const [showGroupModal,setShowGroupModal] = useState(false);
   const [editGroup,setEditGroup] = useState(null);
+  const [showProductModal,setShowProductModal] = useState(false);
+  const [editProductId,setEditProductId] = useState(null);
+  const [productSearch,setProductSearch] = useState('');
+  const [showCustomerModal,setShowCustomerModal] = useState(false);
+  const [editCustomerName,setEditCustomerName] = useState(null);
+  const [customerSearch,setCustomerSearch] = useState('');
   const fileRef=useRef();
   const fy=data.settings||{};
   const [fyStartMonth,setFyStartMonth]=useState(fy.fiscalYearStart?.month||1);
@@ -1452,7 +1507,37 @@ function SettingsScreen() {
   const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
   return <div className="fade-in">
-    <div className="page-header"><h2>Settings</h2><p>Manage groups, fiscal year, and data sync</p></div>
+    <div className="page-header"><h2>Settings</h2><p>Manage products, customers, groups, fiscal year, and data sync</p></div>
+
+    {/* Product Setup */}
+    <div className="card"><div className="card-header"><h3>Product Setup</h3><button className="btn btn-primary btn-sm" onClick={()=>{setEditProductId(null);setShowProductModal(true);}}><Icon name="plus" size={14}/>Add Product</button></div>
+      <div style={{marginBottom:12}}><input placeholder="Search products..." value={productSearch} onChange={e=>setProductSearch(e.target.value)} style={{maxWidth:300}}/></div>
+      <div style={{maxHeight:400,overflowY:'auto'}}><table><thead><tr><th>Product Name</th><th>Packaging</th><th style={{textAlign:'right'}}>Price</th><th></th></tr></thead><tbody>
+        {allProducts.filter(p=>(p.name+' '+p.packaging).toLowerCase().includes(productSearch.toLowerCase())).map(p=><tr key={p.id}>
+          <td style={{fontWeight:500}}>{p.name}</td>
+          <td>{p.packaging?<span className="tag" style={{background:p.packaging==='Tote'?'var(--purple-bg)':'var(--cyan-bg)',color:p.packaging==='Tote'?'var(--purple)':'var(--cyan)'}}>{p.packaging}</span>:<span style={{color:'var(--text-secondary)',fontSize:12}}>—</span>}</td>
+          <td className="inv-cell">${p.price}</td>
+          <td style={{textAlign:'right'}}>
+            <button className="btn-icon" style={{marginRight:4}} onClick={()=>{setEditProductId(p.id);setShowProductModal(true);}}><Icon name="edit" size={14}/></button>
+          </td>
+        </tr>)}
+      </tbody></table></div>
+    </div>
+    {showProductModal&&<ProductModal productId={editProductId} onClose={()=>setShowProductModal(false)}/>}
+
+    {/* Customer Management */}
+    <div className="card"><div className="card-header"><h3>Customer Management</h3><button className="btn btn-primary btn-sm" onClick={()=>{setEditCustomerName(null);setShowCustomerModal(true);}}><Icon name="plus" size={14}/>Add Customer</button></div>
+      <div style={{marginBottom:12}}><input placeholder="Search customers..." value={customerSearch} onChange={e=>setCustomerSearch(e.target.value)} style={{maxWidth:300}}/></div>
+      <div style={{maxHeight:300,overflowY:'auto'}}><table><thead><tr><th>Customer Name</th><th></th></tr></thead><tbody>
+        {allCustomers.filter(c=>c.toLowerCase().includes(customerSearch.toLowerCase())).map(c=><tr key={c}>
+          <td style={{fontWeight:500}}>{c}</td>
+          <td style={{textAlign:'right'}}>
+            <button className="btn-icon" style={{marginRight:4}} onClick={()=>{setEditCustomerName(c);setShowCustomerModal(true);}}><Icon name="edit" size={14}/></button>
+          </td>
+        </tr>)}
+      </tbody></table></div>
+    </div>
+    {showCustomerModal&&<CustomerModal customerName={editCustomerName} onClose={()=>setShowCustomerModal(false)}/>}
 
     {/* Customer Groups */}
     <div className="card"><div className="card-header"><h3>Customer Groups</h3><button className="btn btn-primary btn-sm" onClick={()=>{setEditGroup(null);setShowGroupModal(true);}}><Icon name="plus" size={14}/>Add Group</button></div>
@@ -1517,8 +1602,65 @@ function SettingsScreen() {
   </div>;
 }
 
+function ProductModal({productId,onClose}) {
+  const {allProducts,addProduct,updateProduct}=useApp();
+  const existing=productId?allProducts.find(p=>p.id===productId):null;
+  const [name,setName]=useState(existing?.name||'');
+  const [packaging,setPackaging]=useState(existing?.packaging||'');
+  const [price,setPrice]=useState(existing?.price||'');
+  const save=()=>{
+    if(!name.trim()){alert('Enter product name');return;}
+    if(existing){
+      updateProduct(productId,{name:name.trim(),packaging,price:parseFloat(price)||0});
+    } else {
+      const id=name.trim().toLowerCase().replace(/[^a-z0-9]+/g,'-')+(packaging===''?'':packaging==='Tote'?'-tote':'-25');
+      if(allProducts.find(p=>p.id===id)){alert('Product with this ID already exists. Try a different name or packaging.');return;}
+      addProduct({id,name:name.trim(),packaging,price:parseFloat(price)||0});
+    }
+    onClose();
+  };
+  return <Modal title={existing?'Edit Product':'Add New Product'} onClose={onClose}>
+    <div className="modal-body">
+      <div className="form-group"><label>Product Name</label><input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g., BioCast Max"/></div>
+      <div className="form-group"><label>Packaging</label><select value={packaging} onChange={e=>setPackaging(e.target.value)}>
+        <option value="">None</option>
+        <option value="2.5 Gal">2.5 Gal</option>
+        <option value="Tote">Tote</option>
+      </select></div>
+      <div className="form-group"><label>Price ($)</label><input type="number" step="0.01" value={price} onChange={e=>setPrice(e.target.value)} placeholder="0.00"/></div>
+      {name&&<p style={{fontSize:12,color:'var(--text-secondary)',marginTop:8}}>Will display as: <strong>{packaging?`${name.trim()} - ${packaging}`:name.trim()}</strong></p>}
+    </div>
+    <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={save}>{existing?'Save Changes':'Add Product'}</button></div>
+  </Modal>;
+}
+
+function CustomerModal({customerName,onClose}) {
+  const {allCustomers,updateCustomer}=useApp();
+  const [name,setName]=useState(customerName||'');
+  const {addCustomer}=useApp();
+  const isNew=!customerName;
+  const save=()=>{
+    if(!name.trim()){alert('Enter customer name');return;}
+    if(isNew){
+      if(allCustomers.includes(name.trim())){alert('Customer already exists');return;}
+      addCustomer(name.trim());
+    } else {
+      if(name.trim()!==customerName&&allCustomers.includes(name.trim())){alert('Customer with this name already exists');return;}
+      updateCustomer(customerName,name.trim());
+    }
+    onClose();
+  };
+  return <Modal title={isNew?'Add New Customer':'Edit Customer'} onClose={onClose}>
+    <div className="modal-body">
+      <div className="form-group"><label>Customer Name</label><input value={name} onChange={e=>setName(e.target.value)} placeholder="Enter customer name"/></div>
+      {!isNew&&name.trim()!==customerName&&<p style={{fontSize:12,color:'var(--primary)',marginTop:4}}>All orders, deliveries, and group memberships will be updated to the new name.</p>}
+    </div>
+    <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={save}>{isNew?'Add Customer':'Save Changes'}</button></div>
+  </Modal>;
+}
+
 function GroupModal({groupIndex,onClose}) {
-  const {data,addGroup,updateGroup}=useApp();
+  const {data,allCustomers,addGroup,updateGroup}=useApp();
   const existing=groupIndex!==null?data.customerGroups[groupIndex]:null;
   const [name,setName]=useState(existing?.name||'');const [members,setMembers]=useState(existing?.members||[]);const [search,setSearch]=useState('');
   const toggle=c=>setMembers(ms=>ms.includes(c)?ms.filter(m=>m!==c):[...ms,c]);
@@ -1528,7 +1670,7 @@ function GroupModal({groupIndex,onClose}) {
       <div className="form-group"><label>Group Name</label><input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g., Webster Ag"/></div>
       <div className="form-group"><label>Members</label><input placeholder="Search customers..." value={search} onChange={e=>setSearch(e.target.value)} style={{marginBottom:8}}/>
         <div style={{maxHeight:250,overflowY:'auto',border:'1px solid var(--border)',borderRadius:6}}>
-          {ALL_CUSTOMERS.filter(c=>c.toLowerCase().includes(search.toLowerCase())).map(c=><label key={c} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 12px',cursor:'pointer',fontSize:13,background:members.includes(c)?'var(--primary-bg)':''}}>
+          {allCustomers.filter(c=>c.toLowerCase().includes(search.toLowerCase())).map(c=><label key={c} style={{display:'flex',alignItems:'center',gap:8,padding:'6px 12px',cursor:'pointer',fontSize:13,background:members.includes(c)?'var(--primary-bg)':''}}>
             <input type="checkbox" checked={members.includes(c)} onChange={()=>toggle(c)} style={{width:'auto'}}/>{c}</label>)}
         </div></div>
       {members.length>0&&<div style={{marginTop:8}}><span style={{fontSize:12,color:'var(--text-secondary)'}}>Selected: </span>{members.map(m=><span key={m} className="tag" style={{marginRight:4}}>{m}</span>)}</div>}
