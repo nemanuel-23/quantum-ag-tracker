@@ -1,0 +1,7 @@
+.DS_Store
+*.log
+_v5.1-local-base.html
+_v6.0-claude-build.html
+_github-live-index.html
+_github-file-list.txt
+*.command
