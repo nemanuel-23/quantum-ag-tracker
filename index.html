@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -88,10 +87,34 @@ input:focus,select:focus,textarea:focus{border-color:var(--primary-light);box-sh
 .chip-select{display:flex;flex-wrap:wrap;gap:6px}
 .chip{padding:4px 12px;border-radius:99px;font-size:12px;cursor:pointer;border:1px solid var(--border);background:#fff;transition:all .15s}
 .chip.selected{background:var(--primary);color:#fff;border-color:var(--primary)}
-.inv-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.inv-table-wrap{overflow-x:auto;overflow-y:auto;max-height:72vh;-webkit-overflow-scrolling:touch;position:relative}
 .spreadsheet-wrap{overflow:visible;padding:0}
 .spreadsheet-scroll{overflow-x:scroll;overflow-y:auto;max-height:75vh;-webkit-overflow-scrolling:touch;display:block}
-.spreadsheet-scroll table{width:auto !important;border-collapse:collapse;table-layout:auto}
+.spreadsheet-scroll table{width:auto !important;border-collapse:separate;border-spacing:0;table-layout:auto}
+
+/* ══ FROZEN FIRST COLUMN + STICKY HEADER ══
+   NOTE: border-collapse:collapse drops borders on position:sticky cells in every
+   browser (collapsed borders belong to the table, not the cell, so they scroll
+   away). We switch these tables to border-collapse:separate and redraw the
+   borders with box-shadow, which IS painted on the sticky cell itself.
+   Sticky cells also need an opaque background or rows scroll visibly underneath. */
+.freeze-table{border-collapse:separate !important;border-spacing:0}
+.freeze-table th,.freeze-table td{box-shadow:inset 0 -1px 0 #f1f5f9}
+.freeze-table thead th{box-shadow:inset 0 -2px 0 var(--border)}
+/* sticky header row */
+.freeze-table thead th{position:-webkit-sticky;position:sticky;top:0;z-index:20;background:#f8fafc}
+/* frozen first column */
+.freeze-table tbody td:first-child,
+.freeze-table tfoot td:first-child{position:-webkit-sticky;position:sticky;left:0;z-index:10;background:#fff;box-shadow:inset 0 -1px 0 #f1f5f9,2px 0 4px -2px rgba(15,23,42,.18)}
+.freeze-table thead th:first-child{left:0;z-index:30;box-shadow:inset 0 -2px 0 var(--border),2px 0 4px -2px rgba(15,23,42,.18)}
+/* hover + zebra must repaint the frozen cell too, else it stays white */
+.freeze-table tbody tr:hover td{background:#f8fafc}
+.freeze-table tbody tr:hover td:first-child{background:#f8fafc}
+.freeze-table tbody tr.row-alt td:first-child{background:#f8fafc}
+.freeze-table tbody tr.row-sel td:first-child{background:var(--primary-bg)}
+.freeze-table tfoot td{position:-webkit-sticky;position:sticky;bottom:0;z-index:15;background:#f0f9ff;font-weight:700;box-shadow:inset 0 2px 0 var(--primary)}
+.freeze-table tfoot td:first-child{z-index:25;background:#f0f9ff;box-shadow:inset 0 2px 0 var(--primary),2px 0 4px -2px rgba(15,23,42,.18)}
+@media(max-width:768px){.inv-table-wrap{max-height:none}.freeze-table thead th{position:static}}
 .product-col{min-width:80px;max-width:120px}
 .drill-panel{background:#fff;border:2px solid var(--primary);border-radius:var(--radius);padding:20px;margin-bottom:20px;animation:slideDown .25s ease-out}
 @keyframes slideDown{from{opacity:0;max-height:0;padding:0 20px}to{opacity:1;max-height:2000px}}
@@ -129,7 +152,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--primary-light);box-sh
 const {useState,useEffect,useCallback,useMemo,createContext,useContext,useRef} = React;
 
 // ── APP VERSION ──
-const APP_VERSION = '5.1';
+const APP_VERSION = '6.0';
 
 // ── SUPABASE AUTH CONFIG ──
 const SB_ROW_ID = '277449c7-b587-4e4d-bca0-835cbce1771e';
@@ -285,6 +308,18 @@ const STATUS_OPTIONS = [
 ];
 const getStatus = v => STATUS_OPTIONS.find(s=>s.value===v)||STATUS_OPTIONS[0];
 
+// ── ITEM 14: RETURN TICKETS ──
+// A return is product physically coming BACK. It credits available inventory.
+// "Weigh-back" is the specific case where more was delivered than ordered and the
+// excess is recovered — it pairs with the over-delivery exception on the Dashboard.
+const RETURN_REASONS = [
+  {value:"weigh-back",label:"Weigh Back (over-delivered)"},
+  {value:"unused",label:"Unused / Not Needed"},
+  {value:"damaged",label:"Damaged"},
+  {value:"wrong-product",label:"Wrong Product"},
+  {value:"other",label:"Other"}
+];
+
 // ── INITIAL DATA ──
 const INITIAL_DATA = {
   products: DEFAULT_PRODUCTS,
@@ -328,17 +363,27 @@ const INITIAL_DATA = {
   ],
   deliveries: [],
   deliveryTickets: [],
+  returns: [],
+  // Side-car metadata keyed by customer NAME. Orders/deliveries/groups all reference
+  // customers by name string, so keeping this separate avoids a risky refactor of
+  // every screen. updateCustomer() must move this key when a customer is renamed.
+  customerMeta: {},
   settings: {
     fiscalYearStart:{month:1,day:1},
     fiscalYearEnd:{month:12,day:31},
     fiscalYearLabel:'end',
     archivedYears:[],
+    users:['Nick Emanuel'],
     supabase:{url:SB_URL,anonKey:SB_ANON_KEY,enabled:true}
   }
 };
 
 // ── HELPERS ──
 const uid = () => 'id_'+Math.random().toString(36).slice(2,9)+Date.now().toString(36);
+// Coerce anything to a finite number. Guards every arithmetic reduce in the app:
+// one bad value from a hand-edited JSON import or a legacy string qty used to
+// turn an entire inventory column into NaN.
+const num = v => {const n=typeof v==='number'?v:parseFloat(v);return Number.isFinite(n)?n:0;};
 const fmt = n => n==null?'—':typeof n==='number'?n.toLocaleString('en-US',{maximumFractionDigits:1}):n;
 const fmtDate = d => {if(!d)return '—';const dt=new Date(d+'T00:00:00');return isNaN(dt)?'—':dt.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})};
 const today = () => new Date().toISOString().split('T')[0];
@@ -386,7 +431,11 @@ function getFiscalYear(dateStr, fyStart, fyLabel) {
 function getAvailableYears(orders, fyStart, fyLabel) {
   const years = new Set();
   orders.forEach(o=>years.add(getFiscalYear(o.date,fyStart,fyLabel)));
-  if(years.size===0) years.add(getFiscalYear(today(),fyStart,fyLabel));
+  // 'Undated' is a bucket, not a selectable year — those orders are folded into
+  // whichever real year is active (see yearOrders). Offering it in the year dropdown
+  // would let the user select a "year" containing only dateless rows.
+  years.delete('Undated');
+  years.add(getFiscalYear(today(),fyStart,fyLabel));   // current year is always selectable
   return [...years].sort().reverse();
 }
 
@@ -418,6 +467,10 @@ const Icon = ({name,...p}) => {
     cloud:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 10h-1.26A8 8 0 109 20h9a5 5 0 000-10z"/></svg>,
     list:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>,
     grid:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>,
+    undo:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 00-9-9 9 9 0 00-6 2.3L3 13"/></svg>,
+    pen:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg>,
+    phone:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6A19.79 19.79 0 012.12 4.18 2 2 0 014.11 2h3a2 2 0 012 1.72c.13.96.36 1.9.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0122 16.92z"/></svg>,
+    note:<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8"/></svg>,
   };
   return <span style={{display:'inline-flex',width:p.size||18,height:p.size||18}} {...p}>{icons[name]}</span>;
 };
@@ -430,22 +483,55 @@ const supabaseClient = sbClient;
 const AppContext = createContext();
 function useApp(){return useContext(AppContext);}
 
+// ── SCHEMA MIGRATION ──
+// Single source of truth for shape-fixing. Previously this logic was duplicated in
+// three places (localStorage load, Supabase initial fetch, Supabase realtime handler)
+// and they had already drifted — the realtime handler forgot deliveryTickets, so a
+// realtime event from another device could hand the app an object with no
+// deliveryTickets array and crash the Saved Tickets tab on next render.
+function migrate(raw){
+  const d = raw && typeof raw==='object' ? {...raw} : {};
+  if(!d.settings) d.settings = {...INITIAL_DATA.settings};
+  if(!Array.isArray(d.products)||!d.products.length) d.products = DEFAULT_PRODUCTS;
+  if(!Array.isArray(d.customers)||!d.customers.length) d.customers = DEFAULT_CUSTOMERS;
+  if(!Array.isArray(d.orders)) d.orders = [];
+  if(!Array.isArray(d.deliveries)) d.deliveries = [];
+  if(!Array.isArray(d.deliveryTickets)) d.deliveryTickets = [];
+  if(!Array.isArray(d.returns)) d.returns = [];
+  if(!Array.isArray(d.customerGroups)) d.customerGroups = [];
+  if(!d.customerMeta||typeof d.customerMeta!=='object') d.customerMeta = {};
+  if(!d.inventory||typeof d.inventory!=='object') d.inventory = {};
+  if(!Array.isArray(d.settings.users)||!d.settings.users.length) d.settings.users = ['Nick Emanuel'];
+  // products gained a packaging field
+  d.products = d.products.map(p=>p.packaging!==undefined?p:{...p,packaging:DEFAULT_PRODUCTS.find(x=>x.id===p.id)?.packaging||''});
+  // inventory rows must always have an additions array with numeric qty.
+  // Spread the original row FIRST so any field this version doesn't know about
+  // survives. Rebuilding the object from scratch would silently delete unknown
+  // keys and then the debounced sync would write that loss back to Supabase.
+  Object.keys(d.inventory).forEach(pid=>{
+    const inv=d.inventory[pid]||{};
+    d.inventory[pid]={...inv,starting:num(inv.starting),additions:Array.isArray(inv.additions)?inv.additions.map(a=>({...a,qty:num(a?.qty)})):[]};
+  });
+  // Pump returns used to be a bare boolean, which cannot express "5 out, 3 back".
+  // Promote to a quantity: previously-returned rows return their full original count.
+  d.deliveries = d.deliveries.map(dl=>{
+    const out=num(dl.pumpsOut);
+    const returned = dl.pumpsReturnedQty!==undefined ? num(dl.pumpsReturnedQty) : (dl.pumpsReturned?out:0);
+    const totesOut=num(dl.totes);
+    const totesBack = dl.totesReturnedQty!==undefined ? num(dl.totesReturnedQty) : (dl.totesReturned?totesOut:0);
+    return {...dl,pumpsOut:out,pumpsReturnedQty:Math.min(returned,out),totes:totesOut,totesReturnedQty:Math.min(totesBack,totesOut),
+            pumpsReturned:returned>=out&&out>0,totesReturned:totesBack>=totesOut&&totesOut>0};
+  });
+  return d;
+}
+
 function AppProvider({children}) {
   const [data, setData] = useState(() => {
     const saved = localStorage.getItem('quantumag_data');
     if(saved){
-      try{
-        const parsed = JSON.parse(saved);
-        if(!parsed.settings) parsed.settings = INITIAL_DATA.settings;
-        if(!parsed.deliveryTickets) parsed.deliveryTickets = [];
-        if(!parsed.products) parsed.products = DEFAULT_PRODUCTS;
-        if(!parsed.customers) parsed.customers = DEFAULT_CUSTOMERS;
-        // Migrate: add packaging field to products that don't have it
-        parsed.products = parsed.products.map(p=>p.packaging!==undefined?p:{...p,packaging:DEFAULT_PRODUCTS.find(d=>d.id===p.id)?.packaging||''});
-        return parsed;
-      }catch(e){}
+      try{ return migrate(JSON.parse(saved)); }catch(e){ console.warn('Corrupt local data, falling back to defaults:',e); }
     }
-    return INITIAL_DATA;
+    return migrate(INITIAL_DATA);
   });
   const [toast,setToast] = useState(null);
   const [sbConnected,setSbConnected] = useState(!!supabaseClient);
@@ -458,17 +544,44 @@ function AppProvider({children}) {
   // Save to localStorage on every change
   useEffect(()=>{localStorage.setItem('quantumag_data',JSON.stringify(data));localStorage.setItem('quantumag_version',APP_VERSION);},[data]);
 
-  // Push to Supabase whenever data changes — but ONLY after initial fetch completes
-  // Strip base64 attachment data before pushing (too large for Supabase; attachments stay local only)
+  // Push to Supabase whenever data changes — but ONLY after initial fetch completes.
+  // Strip base64 attachment data before pushing (too large for Supabase; stays local only).
+  //
+  // BUGFIX (silent data loss): isRemoteUpdate was set true immediately before setData()
+  // and only cleared HERE. But if the incoming remote payload was structurally identical,
+  // React bailed out of the re-render, this effect never ran, and the flag stayed true —
+  // so the NEXT genuine local edit was consumed clearing the stale flag and never reached
+  // Supabase. The user's change vanished on refresh. The flag is now cleared by the same
+  // code that sets it, via a microtask, so it can never outlive its own update.
+  //
+  // BUGFIX (write amplification): every keystroke upserted the entire document. Debounced
+  // to 800ms so a burst of edits collapses into one write.
   useEffect(()=>{
     if(!supabaseClient) return;
     if(!hasFetched.current) return;
-    if(isRemoteUpdate.current){isRemoteUpdate.current=false;return;}
+    if(isRemoteUpdate.current) return;
     const stripAttachments=arr=>(arr||[]).map(item=>({...item,attachments:(item.attachments||[]).map(a=>({type:a.type,timestamp:a.timestamp}))}));
-    const syncData={...data,deliveries:stripAttachments(data.deliveries),deliveryTickets:stripAttachments(data.deliveryTickets)};
-    supabaseClient.from('app_data').upsert({id:SB_ROW_ID,data:syncData,updated_at:new Date().toISOString()})
-      .then(({error})=>{if(error)console.warn('Supabase push error:',error.message);});
+    const t=setTimeout(()=>{
+      const syncData={...data,deliveries:stripAttachments(data.deliveries),deliveryTickets:stripAttachments(data.deliveryTickets)};
+      supabaseClient.from('app_data').upsert({id:SB_ROW_ID,data:syncData,updated_at:new Date().toISOString()})
+        .then(({error})=>{if(error)console.warn('Supabase push error:',error.message);});
+    },800);
+    return ()=>clearTimeout(t);
   },[data]);
+
+  // Apply a remote payload without echoing it straight back to the server.
+  const applyRemote = useCallback((remoteRaw)=>{
+    const remote = typeof remoteRaw==='string' ? JSON.parse(remoteRaw) : remoteRaw;
+    isRemoteUpdate.current=true;
+    setData(d=>{
+      const merged=migrate({...d,...remote});
+      merged.settings={...d.settings,...(remote.settings||{}),supabase:{url:SB_URL,anonKey:SB_ANON_KEY,enabled:true}};
+      return merged;
+    });
+    // Clear on the microtask queue: runs after React has committed (or bailed out of)
+    // this update, but before any subsequent user interaction can produce a local edit.
+    Promise.resolve().then(()=>{isRemoteUpdate.current=false;});
+  },[]);
 
   // Supabase: fetch on startup + listen for realtime changes
   useEffect(()=>{
@@ -476,40 +589,17 @@ function AppProvider({children}) {
     setSbConnected(true);
     // Fetch latest data from Supabase on startup
     supabaseClient.from('app_data').select('*').eq('id',SB_ROW_ID).limit(1).then(({data:rows,error})=>{
-      if(!error && rows && rows.length>0 && rows[0].data){
-        const remote = typeof rows[0].data === 'string' ? JSON.parse(rows[0].data) : rows[0].data;
-        isRemoteUpdate.current=true;
-        setData(d=>{
-          const merged={...d,...remote};
-          merged.settings={...d.settings,...(remote.settings||{}),supabase:{url:SB_URL,anonKey:SB_ANON_KEY,enabled:true}};
-          if(!merged.deliveryTickets) merged.deliveryTickets=[];
-          if(!merged.products) merged.products=DEFAULT_PRODUCTS;
-          if(!merged.customers) merged.customers=DEFAULT_CUSTOMERS;
-          merged.products=merged.products.map(p=>p.packaging!==undefined?p:{...p,packaging:DEFAULT_PRODUCTS.find(x=>x.id===p.id)?.packaging||''});
-          return merged;
-        });
-      }
+      if(!error && rows && rows.length>0 && rows[0].data) applyRemote(rows[0].data);
       if(error) console.warn('Supabase data fetch:',error.message);
       // Enable pushing only AFTER initial fetch is done
       hasFetched.current=true;
     });
     // Listen for realtime changes from other devices
     const channel = supabaseClient.channel('realtime_sync').on('postgres_changes',{event:'*',schema:'public',table:'app_data'},(payload)=>{
-      if(payload.new?.data){
-        const remote = typeof payload.new.data === 'string' ? JSON.parse(payload.new.data) : payload.new.data;
-        isRemoteUpdate.current=true;
-        setData(d=>{
-          const merged={...d,...remote};
-          merged.settings={...d.settings,...(remote.settings||{}),supabase:{url:SB_URL,anonKey:SB_ANON_KEY,enabled:true}};
-          if(!merged.products) merged.products=DEFAULT_PRODUCTS;
-          if(!merged.customers) merged.customers=DEFAULT_CUSTOMERS;
-          merged.products=merged.products.map(p=>p.packaging!==undefined?p:{...p,packaging:DEFAULT_PRODUCTS.find(x=>x.id===p.id)?.packaging||''});
-          return merged;
-        });
-      }
+      if(payload.new?.data) applyRemote(payload.new.data);
     }).subscribe();
     return ()=>{supabaseClient.removeChannel(channel);};
-  },[]);
+  },[applyRemote]);
 
   const updateData = (updater)=>{
     setData(d=>typeof updater==='function'?updater(d):updater);
@@ -520,8 +610,29 @@ function AppProvider({children}) {
   const addOrder=o=>{updateData(d=>({...d,orders:[...d.orders,{...o,id:uid()}]}));showToast('Order added');};
   const updateOrder=(id,u)=>{updateData(d=>({...d,orders:d.orders.map(o=>o.id===id?{...o,...u}:o)}));};
   const deleteOrder=id=>{updateData(d=>({...d,orders:d.orders.filter(o=>o.id!==id)}));showToast('Order deleted');};
-  const addDelivery=del=>{updateData(d=>({...d,deliveries:[...d.deliveries,{...del,id:uid()}]}));showToast('Delivery recorded');};
+  // Bulk order mutation — used by the Orders bulk action bar (mark invoiced, set status).
+  // Applied in ONE setData pass so React commits a single re-render and Supabase gets a
+  // single debounced write, rather than N sequential updates racing each other.
+  const bulkUpdateOrders=(ids,patch)=>{
+    const idSet=new Set(ids);
+    updateData(d=>({...d,orders:d.orders.map(o=>idSet.has(o.id)?{...o,...patch}:o)}));
+    showToast(`${ids.length} order${ids.length!==1?'s':''} updated`);
+  };
+  const addDelivery=del=>{updateData(d=>({...d,deliveries:[...d.deliveries,{...del,id:uid()}]}));};
   const updateDelivery=(id,u)=>{updateData(d=>({...d,deliveries:d.deliveries.map(dl=>dl.id===id?{...dl,...u}:dl)}));};
+  const deleteDelivery=id=>{updateData(d=>({...d,deliveries:d.deliveries.filter(dl=>dl.id!==id)}));showToast('Delivery deleted');};
+  // Partial equipment return: 5 pumps out, 3 back is now representable.
+  const returnEquipment=(id,kind,qty)=>{updateData(d=>({...d,deliveries:d.deliveries.map(dl=>{
+    if(dl.id!==id) return dl;
+    if(kind==='pumps'){const q=Math.min(num(dl.pumpsOut),num(dl.pumpsReturnedQty)+num(qty));
+      return {...dl,pumpsReturnedQty:q,pumpsReturned:q>=num(dl.pumpsOut),pumpsReturnedDate:today()};}
+    const q=Math.min(num(dl.totes),num(dl.totesReturnedQty)+num(qty));
+    return {...dl,totesReturnedQty:q,totesReturned:q>=num(dl.totes),totesReturnedDate:today()};
+  })}));};
+  // Return tickets — product physically comes back and credits available inventory.
+  const addReturn=r=>{updateData(d=>({...d,returns:[...(d.returns||[]),{...r,id:uid(),createdAt:today()}]}));showToast('Return ticket created');};
+  const deleteReturn=id=>{updateData(d=>({...d,returns:(d.returns||[]).filter(r=>r.id!==id)}));showToast('Return deleted');};
+  const setCustomerMeta=(name,meta)=>{updateData(d=>({...d,customerMeta:{...(d.customerMeta||{}),[name]:{...((d.customerMeta||{})[name]||{}),...meta}}}));};
   const addGroup=g=>{updateData(d=>({...d,customerGroups:[...d.customerGroups,g]}));};
   const updateGroup=(i,g)=>{updateData(d=>({...d,customerGroups:d.customerGroups.map((x,j)=>j===i?g:x)}));};
   const deleteGroup=i=>{updateData(d=>({...d,customerGroups:d.customerGroups.filter((_,j)=>j!==i)}));};
@@ -539,9 +650,17 @@ function AppProvider({children}) {
     const deliveries=d.deliveries.map(dl=>dl.customer===oldName?{...dl,customer:newName}:dl);
     const deliveryTickets=d.deliveryTickets.map(t=>t.customer===oldName?{...t,customer:newName}:t);
     const customerGroups=d.customerGroups.map(g=>({...g,members:g.members.map(m=>m===oldName?newName:m)}));
-    return{...d,customers,orders,deliveries,deliveryTickets,customerGroups};
+    const returns=(d.returns||[]).map(r=>r.customer===oldName?{...r,customer:newName}:r);
+    // customerMeta is keyed by name — the key must move with the rename or the
+    // phone number silently detaches from the customer.
+    const customerMeta={...(d.customerMeta||{})};
+    if(customerMeta[oldName]!==undefined){customerMeta[newName]=customerMeta[oldName];delete customerMeta[oldName];}
+    return{...d,customers,orders,deliveries,deliveryTickets,customerGroups,returns,customerMeta};
   });showToast('Customer updated');};
-  const deleteCustomer=name=>{updateData(d=>({...d,customers:d.customers.filter(c=>c!==name)}));showToast('Customer removed');};
+  const deleteCustomer=name=>{updateData(d=>{
+    const customerMeta={...(d.customerMeta||{})};delete customerMeta[name];
+    return{...d,customers:d.customers.filter(c=>c!==name),customerMeta};
+  });showToast('Customer removed');};
 
   const fyStart = data.settings?.fiscalYearStart||{month:1,day:1};
   const fyLabel = data.settings?.fiscalYearLabel||'end';
@@ -549,8 +668,16 @@ function AppProvider({children}) {
   const archivedYears = data.settings?.archivedYears||[];
   const visibleYears = availableYears.filter(y=>!archivedYears.includes(y));
 
+  // Orders with a blank/invalid date resolve to the 'Undated' pseudo-year. Scoping
+  // strictly to activeYear would make them invisible in EVERY year — the seed data
+  // contains exactly such a row (Ross Janak, 265 biocast-max-tote), and its quantity
+  // would silently stop counting against inventory. Undated orders are real
+  // commitments, so they are included in whichever year is being viewed.
   const yearOrders = useMemo(()=>{
-    return data.orders.filter(o=>getFiscalYear(o.date,fyStart,fyLabel)===activeYear);
+    return data.orders.filter(o=>{
+      const y=getFiscalYear(o.date,fyStart,fyLabel);
+      return y===activeYear||y==='Undated';
+    });
   },[data.orders,activeYear,fyStart,fyLabel]);
 
   const allProducts = data.products||DEFAULT_PRODUCTS;
@@ -568,15 +695,46 @@ function AppProvider({children}) {
     return allCustomers.filter(c=>used.has(c));
   },[data,allCustomers]);
 
-  const getProductTotalSold=useCallback(pid=>data.orders.reduce((s,o)=>s+(o.products[pid]||0),0),[data.orders]);
-  const getProductDelivered=useCallback(pid=>data.deliveries.reduce((s,d)=>s+(d.products?.[pid]||0),0),[data.deliveries]);
-  const getProductAvailable=useCallback(pid=>{const inv=data.inventory[pid]||{starting:0,additions:[]};const added=inv.additions.reduce((s,a)=>s+a.qty,0);return inv.starting+added-getProductTotalSold(pid);},[data.inventory,getProductTotalSold]);
+  // ── INVENTORY MATH (fiscal-year scoped, NaN-hardened) ──
+  // BUGFIX: these previously reduced over data.orders / data.deliveries — ALL years,
+  // including archived ones — while the Dashboard and Orders pages scoped to yearOrders.
+  // Result: last season's orders were subtracted from this season's stock, so "Available"
+  // was wrong on every product carried across a year boundary. Now scoped to activeYear.
+  // BUGFIX: a single non-numeric qty (bad import, hand-edited JSON) turned the entire
+  // column into NaN because `s + a.qty` propagates. num() coerces defensively.
+
+  // Deliveries belonging to the active fiscal year. A delivery with no date of its own
+  // falls back to its parent order's date so it is never orphaned out of the year.
+  const yearDeliveries = useMemo(()=>{
+    const orderYear={};data.orders.forEach(o=>{orderYear[o.id]=getFiscalYear(o.date,fyStart,fyLabel);});
+    return data.deliveries.filter(d=>{
+      const y = d.date ? getFiscalYear(d.date,fyStart,fyLabel) : orderYear[d.orderId];
+      return y===activeYear;
+    });
+  },[data.deliveries,data.orders,activeYear,fyStart,fyLabel]);
+
+  const getProductTotalSold=useCallback(pid=>yearOrders.reduce((s,o)=>s+num(o.products?.[pid]),0),[yearOrders]);
+  const getProductDelivered=useCallback(pid=>yearDeliveries.reduce((s,d)=>s+num(d.products?.[pid]),0),[yearDeliveries]);
+  const getProductAdded=useCallback(pid=>{
+    const inv=data.inventory[pid]||{starting:0,additions:[]};
+    return (inv.additions||[]).reduce((s,a)=>s+num(a?.qty),0);
+  },[data.inventory]);
+  // Returns put product back on the shelf, so they credit available inventory.
+  const getProductReturned=useCallback(pid=>(data.returns||[])
+    .filter(r=>!r.date||getFiscalYear(r.date,fyStart,fyLabel)===activeYear)
+    .reduce((s,r)=>s+num(r.products?.[pid]),0),[data.returns,activeYear,fyStart,fyLabel]);
+  const getProductAvailable=useCallback(pid=>{
+    const inv=data.inventory[pid]||{starting:0,additions:[]};
+    return num(inv.starting)+getProductAdded(pid)+getProductReturned(pid)-getProductTotalSold(pid);
+  },[data.inventory,getProductAdded,getProductReturned,getProductTotalSold]);
+  // May legitimately go NEGATIVE when more was delivered than ordered (over-delivery).
+  // Callers must NOT clamp this with Math.max(0,…) — the negative IS the weigh-back signal.
   const getProductSoldNotDelivered=useCallback(pid=>getProductTotalSold(pid)-getProductDelivered(pid),[getProductTotalSold,getProductDelivered]);
   // Per-order delivery tracking: how much of each product on a specific order has been delivered
   const getOrderDelivered=useCallback((orderId)=>{
     const totals={};
     data.deliveries.filter(d=>d.orderId===orderId).forEach(d=>{
-      Object.entries(d.products||{}).forEach(([pid,qty])=>{totals[pid]=(totals[pid]||0)+qty;});
+      Object.entries(d.products||{}).forEach(([pid,qty])=>{totals[pid]=(totals[pid]||0)+num(qty);});
     });
     return totals;
   },[data.deliveries]);
@@ -584,13 +742,67 @@ function AppProvider({children}) {
   const isOrderFullyDelivered=useCallback((orderId)=>{
     const order=data.orders.find(o=>o.id===orderId);if(!order)return false;
     const delivered=getOrderDelivered(orderId);
-    return Object.entries(order.products).every(([pid,qty])=>qty<=0||(delivered[pid]||0)>=qty);
+    const lines=Object.entries(order.products||{}).filter(([,qty])=>num(qty)>0);
+    // An order with no positive lines is not "fully delivered" — it's empty. Returning
+    // true here used to hide brand-new empty orders from the delivery picker entirely.
+    if(lines.length===0) return false;
+    return lines.every(([pid,qty])=>(delivered[pid]||0)>=num(qty));
   },[data.orders,getOrderDelivered]);
 
-  const exportData=()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='quantum-ag-backup-'+today()+'.json';a.click();URL.revokeObjectURL(u);showToast('Exported');};
-  const importData=json=>{try{setData(JSON.parse(json));showToast('Imported');}catch(e){showToast('Invalid file');}};
+  // ── PUMP / TOTE TRACKING (item 13) ──
+  // Aggregates across ALL deliveries regardless of fiscal year: equipment physically
+  // out on a farm doesn't reset at a year boundary the way order quantities do.
+  const equipmentByCustomer=useMemo(()=>{
+    const map={};
+    data.deliveries.forEach(d=>{
+      const c=d.customer||'—';
+      if(!map[c]) map[c]={customer:c,pumpsOut:0,pumpsReturned:0,totesOut:0,totesReturned:0,lastOut:''};
+      map[c].pumpsOut+=num(d.pumpsOut);
+      map[c].pumpsReturned+=num(d.pumpsReturnedQty);
+      map[c].totesOut+=num(d.totes);
+      map[c].totesReturned+=num(d.totesReturnedQty);
+      if(num(d.pumpsOut)>0&&(!map[c].lastOut||d.date>map[c].lastOut)) map[c].lastOut=d.date||'';
+    });
+    return Object.values(map).map(r=>({...r,pumpsHeld:r.pumpsOut-r.pumpsReturned,totesHeld:r.totesOut-r.totesReturned}))
+      .filter(r=>r.pumpsOut>0||r.totesOut>0);
+  },[data.deliveries]);
 
-  return <AppContext.Provider value={{data,setData:updateData,allProducts,allCustomers,activeProducts,activeCustomers,updateInventory,addInventory,addOrder,updateOrder,deleteOrder,addDelivery,updateDelivery,addGroup,updateGroup,deleteGroup,updateSettings,saveDeliveryTicket,addProduct,updateProduct,deleteProduct,addCustomer,updateCustomer,deleteCustomer,getProductTotalSold,getProductDelivered,getProductAvailable,getProductSoldNotDelivered,getOrderDelivered,getOrderDeliveryCount,isOrderFullyDelivered,exportData,importData,showToast,toast,sbConnected,activeYear,setActiveYear,availableYears,visibleYears,archivedYears,yearOrders,fyStart,fyLabel}}>{children}</AppContext.Provider>;
+  const pumpSummary=useMemo(()=>{
+    const t=equipmentByCustomer.reduce((a,r)=>({out:a.out+r.pumpsOut,back:a.back+r.pumpsReturned,
+      totesOut:a.totesOut+r.totesOut,totesBack:a.totesBack+r.totesReturned}),{out:0,back:0,totesOut:0,totesBack:0});
+    return {...t,held:t.out-t.back,totesHeld:t.totesOut-t.totesBack,
+            customersHolding:equipmentByCustomer.filter(r=>r.pumpsHeld>0).length,
+            overdue:data.deliveries.filter(d=>num(d.pumpsOut)>num(d.pumpsReturnedQty)&&d.pumpsReturnDate&&d.pumpsReturnDate<today()).length};
+  },[equipmentByCustomer,data.deliveries]);
+
+  // Over-delivery exceptions (item 3.1): delivered more than ordered → needs invoice
+  // or weigh-back. Surfaced on the Dashboard so it can't be quietly forgotten.
+  const deliveryExceptions=useMemo(()=>{
+    const rows=[];
+    data.orders.forEach(o=>{
+      const delivered={};
+      data.deliveries.filter(d=>d.orderId===o.id).forEach(d=>{
+        Object.entries(d.products||{}).forEach(([pid,q])=>{delivered[pid]=(delivered[pid]||0)+num(q);});
+      });
+      Object.entries(delivered).forEach(([pid,dq])=>{
+        const oq=num(o.products?.[pid]);
+        if(dq>oq) rows.push({orderId:o.id,customer:o.customer,date:o.date,productId:pid,ordered:oq,delivered:dq,over:dq-oq,
+                             resolved:!!(o.overageResolved&&o.overageResolved[pid])});
+      });
+    });
+    return rows;
+  },[data.orders,data.deliveries]);
+
+  const exportData=()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download='quantum-ag-backup-'+today()+'.json';a.click();URL.revokeObjectURL(u);showToast('Exported');};
+  const importData=json=>{try{setData(migrate(JSON.parse(json)));showToast('Imported');}catch(e){showToast('Invalid file');}};
+
+  // Alphabetised product list — used by every picker (order creation, bulk inventory,
+  // delivery add-product). DEFAULT_PRODUCTS is in spreadsheet order, which made the
+  // pickers effectively unsearchable by eye.
+  const productsAZ = useMemo(()=>[...allProducts].sort((a,b)=>
+    productDisplayName(a).localeCompare(productDisplayName(b),undefined,{numeric:true,sensitivity:'base'})),[allProducts]);
+
+  return <AppContext.Provider value={{data,setData:updateData,allProducts,productsAZ,allCustomers,activeProducts,activeCustomers,updateInventory,addInventory,addOrder,updateOrder,deleteOrder,bulkUpdateOrders,addDelivery,updateDelivery,deleteDelivery,returnEquipment,addReturn,deleteReturn,setCustomerMeta,addGroup,updateGroup,deleteGroup,updateSettings,saveDeliveryTicket,addProduct,updateProduct,deleteProduct,addCustomer,updateCustomer,deleteCustomer,getProductTotalSold,getProductDelivered,getProductAdded,getProductReturned,getProductAvailable,getProductSoldNotDelivered,getOrderDelivered,getOrderDeliveryCount,isOrderFullyDelivered,equipmentByCustomer,pumpSummary,deliveryExceptions,yearDeliveries,exportData,importData,showToast,toast,sbConnected,activeYear,setActiveYear,availableYears,visibleYears,archivedYears,yearOrders,fyStart,fyLabel}}>{children}</AppContext.Provider>;
 }
 
 // ── MODAL ──
@@ -603,21 +815,25 @@ function Modal({title,onClose,children,wide}){
 // ══════════════════════════════════
 // ── DASHBOARD WITH DRILL-DOWNS ──
 // ══════════════════════════════════
-function Dashboard() {
-  const {data,activeProducts,yearOrders,activeYear,getProductAvailable,getProductTotalSold,getProductDelivered,getProductSoldNotDelivered,allProducts} = useApp();
+function Dashboard({onNavigate}) {
+  const {data,activeProducts,yearOrders,activeYear,getProductAvailable,getProductTotalSold,getProductDelivered,getProductSoldNotDelivered,allProducts,pumpSummary,equipmentByCustomer,deliveryExceptions,isOrderFullyDelivered} = useApp();
   const [drillDown,setDrillDown] = useState(null);
   const [expandedProduct,setExpandedProduct] = useState(null);
 
   const productsNeeded = activeProducts.filter(p=>getProductAvailable(p.id)<0);
   const productsAvail = activeProducts.filter(p=>getProductAvailable(p.id)>0);
-  const ordersReady = yearOrders.filter(o=>o.status!=='paid');
-  const ordersDelivered = yearOrders.filter(o=>o.status==='paid');
+  // Was `o.status!=='paid'` — a status flag that drifts from reality. Now driven by
+  // actual delivered quantities, matching the delivery picker.
+  const ordersReady = yearOrders.filter(o=>!isOrderFullyDelivered(o.id));
+  const ordersDelivered = yearOrders.filter(o=>isOrderFullyDelivered(o.id));
+  const notInvoiced = yearOrders.filter(o=>!o.invoiced);
 
   const kpis = [
     {key:'needed',label:'Products Needed',value:productsNeeded.length,color:'var(--danger)',sub:'Negative inventory — need to order',icon:'alert'},
     {key:'available',label:'Products Available',value:productsAvail.length,color:'var(--success)',sub:'In stock and ready',icon:'check'},
-    {key:'ready',label:'Orders to Deliver',value:ordersReady.length,color:'var(--warning)',sub:'Not yet marked delivered',icon:'truck'},
+    {key:'ready',label:'Orders to Deliver',value:ordersReady.length,color:'var(--warning)',sub:'Not fully delivered',icon:'truck'},
     {key:'delivered',label:'Orders Delivered',value:ordersDelivered.length,color:'var(--success)',sub:activeYear+' completed',icon:'check'},
+    {key:'invoice',label:'Not Invoiced',value:notInvoiced.length,color:'var(--purple)',sub:activeYear+' awaiting invoice',icon:'orders'},
     {key:'total',label:'Total Orders',value:yearOrders.length,color:'var(--primary)',sub:activeYear+' all statuses',icon:'orders'}
   ];
 
@@ -638,6 +854,68 @@ function Dashboard() {
             <div className="kpi-arrow"><Icon name="down" size={16}/></div>
           </div>
         ))}
+      </div>
+
+      {/* ── ITEM 3.1: OVER-DELIVERY EXCEPTIONS ── */}
+      {deliveryExceptions.length>0&&<div className="card" style={{border:'2px solid var(--danger)',padding:0,marginBottom:20}}>
+        <div className="card-header" style={{padding:'14px 16px',background:'#fef2f2'}}>
+          <h3 style={{color:'var(--danger)',display:'flex',alignItems:'center',gap:6}}><Icon name="alert" size={16}/>Delivered Over Ordered — Needs Invoice or Weigh-Back</h3>
+          <span className="tag" style={{background:'var(--danger-bg)',color:'var(--danger)'}}>{deliveryExceptions.length}</span>
+        </div>
+        <div className="inv-table-wrap" style={{maxHeight:'32vh'}}><table className="freeze-table">
+          <thead><tr><th>Customer</th><th>Order Date</th><th>Product</th><th style={{textAlign:'right'}}>Ordered</th><th style={{textAlign:'right'}}>Delivered</th><th style={{textAlign:'right'}}>Over</th><th></th></tr></thead>
+          <tbody>{deliveryExceptions.map((x,i)=>{const p=allProducts.find(y=>y.id===x.productId);
+            return <tr key={x.orderId+'_'+x.productId}>
+              <td style={{fontWeight:500}}>{x.customer}</td><td>{fmtDate(x.date)}</td>
+              <td>{productDisplayName(p||{name:x.productId})}</td>
+              <td className="inv-cell">{fmt(x.ordered)}</td>
+              <td className="inv-cell">{fmt(x.delivered)}</td>
+              <td className="inv-cell" style={{color:'var(--danger)',fontWeight:700}}>+{fmt(x.over)}</td>
+              <td style={{textAlign:'right',whiteSpace:'nowrap'}}>
+                <button className="btn btn-sm btn-secondary" onClick={()=>onNavigate&&onNavigate('orders',{focusOrderId:x.orderId})}>Open Order</button>
+              </td>
+            </tr>;})}</tbody>
+        </table></div>
+        <div style={{padding:'10px 16px',fontSize:12,color:'var(--text-secondary)',borderTop:'1px solid var(--border)'}}>
+          Either add the extra to the order and invoice it, or record a <strong>Return ticket</strong> (reason: weigh-back) on the Deliveries page.
+        </div>
+      </div>}
+
+      {/* ── ITEM 13: PUMP TRACKER ── */}
+      <div className="card" style={{padding:0,marginBottom:20}}>
+        <div className="card-header" style={{padding:'14px 16px'}}>
+          <h3>Pump &amp; Tote Tracker</h3>
+          <span style={{fontSize:12,color:'var(--text-secondary)'}}>All years — equipment doesn't reset at year end</span>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:0}}>
+          {[
+            {label:'Pumps Out',value:pumpSummary.out,color:'var(--text)',sub:'Total sent out'},
+            {label:'Pumps Returned',value:pumpSummary.back,color:'var(--success)',sub:'Checked back in'},
+            {label:'Pumps Still Out',value:pumpSummary.held,color:pumpSummary.held>0?'var(--orange)':'var(--success)',sub:`${pumpSummary.customersHolding} customer${pumpSummary.customersHolding!==1?'s':''} holding`},
+            {label:'Overdue Returns',value:pumpSummary.overdue,color:pumpSummary.overdue>0?'var(--danger)':'var(--text-secondary)',sub:'Past return date'},
+            {label:'Totes Still Out',value:pumpSummary.totesHeld,color:pumpSummary.totesHeld>0?'var(--purple)':'var(--success)',sub:`${fmt(pumpSummary.totesBack)} of ${fmt(pumpSummary.totesOut)} back`}
+          ].map((s,i)=>(
+            <div key={s.label} style={{padding:'16px 18px',borderRight:i<4?'1px solid var(--border)':'none'}}>
+              <div style={{fontSize:11,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:.5,fontWeight:600}}>{s.label}</div>
+              <div style={{fontSize:26,fontWeight:700,color:s.color,marginTop:4}}>{fmt(s.value)}</div>
+              <div style={{fontSize:11,color:'var(--text-secondary)',marginTop:2}}>{s.sub}</div>
+            </div>
+          ))}
+        </div>
+        {equipmentByCustomer.filter(r=>r.pumpsHeld>0).length>0&&<div style={{borderTop:'1px solid var(--border)'}}>
+          <div className="inv-table-wrap" style={{maxHeight:'30vh'}}><table className="freeze-table">
+            <thead><tr><th>Customer</th><th style={{textAlign:'right'}}>Pumps Held</th><th style={{textAlign:'right'}}>Returned</th><th style={{textAlign:'right'}}>Totes Held</th><th>Last Sent Out</th></tr></thead>
+            <tbody>{[...equipmentByCustomer].filter(r=>r.pumpsHeld>0||r.totesHeld>0).sort((a,b)=>b.pumpsHeld-a.pumpsHeld).map(r=>
+              <tr key={r.customer} style={{cursor:'pointer'}} onClick={()=>onNavigate&&onNavigate('customer-detail',r.customer)}>
+                <td style={{fontWeight:500}}>{r.customer}</td>
+                <td className="inv-cell" style={{fontWeight:700,color:r.pumpsHeld>0?'var(--orange)':'inherit'}}>{fmt(r.pumpsHeld)}</td>
+                <td className="inv-cell" style={{color:'var(--success)'}}>{fmt(r.pumpsReturned)} / {fmt(r.pumpsOut)}</td>
+                <td className="inv-cell" style={{color:r.totesHeld>0?'var(--purple)':'inherit'}}>{fmt(r.totesHeld)}</td>
+                <td>{r.lastOut?fmtDate(r.lastOut):'—'}</td>
+              </tr>)}</tbody>
+            <tfoot><tr><td>TOTALS</td><td className="inv-cell">{fmt(pumpSummary.held)}</td><td className="inv-cell">{fmt(pumpSummary.back)} / {fmt(pumpSummary.out)}</td><td className="inv-cell">{fmt(pumpSummary.totesHeld)}</td><td></td></tr></tfoot>
+          </table></div>
+        </div>}
       </div>
 
       {/* ── DRILL-DOWN: Products Needed ── */}
@@ -725,12 +1003,32 @@ function Dashboard() {
         </div>
       )}
 
+      {/* ── DRILL-DOWN: Not Invoiced (item 4 companion) ── */}
+      {drillDown==='invoice' && (
+        <div className="drill-panel">
+          <div className="drill-header"><h3>Orders Awaiting Invoice — {activeYear}</h3><button className="btn-icon" onClick={()=>setDrillDown(null)}><Icon name="x"/></button></div>
+          {notInvoiced.length===0?<p style={{color:'var(--text-secondary)',fontSize:13}}>Everything in {activeYear} is invoiced.</p>:<>
+            <p style={{fontSize:12,color:'var(--text-secondary)',marginBottom:10}}>Select these on the Orders page to bulk-mark them invoiced.</p>
+            <table><thead><tr><th>Customer</th><th>Date</th><th>Products</th><th>Status</th><th>Delivered</th></tr></thead>
+            <tbody>{[...notInvoiced].sort((a,b)=>new Date(b.date||0)-new Date(a.date||0)).map(o=>{
+              const st=getStatus(o.status);const pc=Object.keys(o.products||{}).filter(k=>num(o.products[k])>0).length;const done=isOrderFullyDelivered(o.id);
+              return <tr key={o.id} style={{cursor:'pointer'}} onClick={()=>onNavigate&&onNavigate('orders',{focusOrderId:o.id})}>
+                <td style={{fontWeight:500}}>{o.customer}</td><td>{fmtDate(o.date)}</td>
+                <td><span className="tag">{pc} product{pc!==1?'s':''}</span></td>
+                <td><span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span></td>
+                <td>{done?<span style={{color:'var(--success)',fontWeight:600}}>Yes</span>:<span style={{color:'var(--warning)'}}>Partial</span>}</td></tr>;
+            })}</tbody></table></>}
+        </div>
+      )}
+
       {/* ── DRILL-DOWN: Total Orders ── */}
       {drillDown==='total' && (
         <div className="drill-panel">
           <div className="drill-header"><h3>All Orders — {activeYear}</h3><button className="btn-icon" onClick={()=>setDrillDown(null)}><Icon name="x"/></button></div>
+          {/* .sort() on yearOrders mutated the memoised array in place — reordering the
+              Orders page as a side effect of opening a Dashboard panel. Copy first. */}
           <table><thead><tr><th>Customer</th><th>Date</th><th>Products</th><th>Status</th><th>Invoiced</th></tr></thead>
-          <tbody>{yearOrders.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0)).map(o=>{const st=getStatus(o.status);const pc=Object.keys(o.products).filter(k=>o.products[k]>0).length;return(
+          <tbody>{[...yearOrders].sort((a,b)=>new Date(b.date||0)-new Date(a.date||0)).map(o=>{const st=getStatus(o.status);const pc=Object.keys(o.products||{}).filter(k=>num(o.products[k])>0).length;return(
             <tr key={o.id}><td style={{fontWeight:500}}>{o.customer}</td><td>{fmtDate(o.date)}</td><td><span className="tag">{pc} product{pc!==1?'s':''}</span></td><td><span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span></td><td>{o.invoiced?'Yes':'No'}</td></tr>
           );})}</tbody></table>
         </div>
@@ -754,8 +1052,10 @@ function Dashboard() {
 // ══════════════════════════
 // ── INVENTORY SCREEN ──
 // ══════════════════════════
-function InventoryScreen() {
-  const {data,allProducts,activeProducts,updateInventory,addInventory,getProductTotalSold,getProductAvailable,getProductSoldNotDelivered,getProductDelivered,showToast} = useApp();
+function InventoryScreen({onNavigate}) {
+  const {data,allProducts,productsAZ,activeProducts,updateInventory,addInventory,getProductTotalSold,getProductAvailable,getProductSoldNotDelivered,getProductDelivered,getProductAdded,getProductReturned,showToast} = useApp();
+  const [drillProduct,setDrillProduct] = useState(null);   // item 10: product → its orders
+  const [bulkSearch,setBulkSearch] = useState('');          // item 12: search in bulk add
   const [addModal,setAddModal] = useState(null);
   const [addDate,setAddDate] = useState(today());
   const [addQty,setAddQty] = useState('');
@@ -774,15 +1074,31 @@ function InventoryScreen() {
 
   const invRows = useMemo(()=>{
     const rows=allProducts.map(p=>{
-      const inv=data.inventory[p.id]||{starting:0,additions:[]};const added=inv.additions.reduce((s,a)=>s+a.qty,0);
-      return{...p,inv,added,sold:getProductTotalSold(p.id),delivered:getProductDelivered(p.id),snd:getProductSoldNotDelivered(p.id),avail:getProductAvailable(p.id)};
+      const inv=data.inventory[p.id]||{starting:0,additions:[]};
+      const added=getProductAdded(p.id);              // num()-hardened, no NaN propagation
+      const returned=getProductReturned(p.id);
+      return{...p,inv,added,returned,sold:getProductTotalSold(p.id),delivered:getProductDelivered(p.id),snd:getProductSoldNotDelivered(p.id),avail:getProductAvailable(p.id)};
     });
-    return invSort(rows,(r,k)=>{switch(k){case'name':return r.name;case'packaging':return r.packaging||'';case'starting':return r.inv.starting;case'added':return r.added;case'sold':return r.sold;case'delivered':return r.delivered;case'snd':return r.snd;case'avail':return r.avail;default:return r.name;}});
-  },[allProducts,data.inventory,getProductTotalSold,getProductDelivered,getProductSoldNotDelivered,getProductAvailable,invSK,invSD]);
+    return invSort(rows,(r,k)=>{switch(k){case'name':return r.name;case'packaging':return r.packaging||'';case'starting':return num(r.inv.starting);case'added':return r.added;case'returned':return r.returned;case'sold':return r.sold;case'delivered':return r.delivered;case'snd':return r.snd;case'avail':return r.avail;default:return r.name;}});
+  },[allProducts,data.inventory,getProductTotalSold,getProductDelivered,getProductSoldNotDelivered,getProductAvailable,getProductAdded,getProductReturned,invSK,invSD]);
 
-  const openBulkModal=()=>{setBulkModal(true);setBulkDate(today());setBulkNote('');setBulkSelected({});setBulkQtys({});};
+  // Column totals — item 11. Every column is footed so the arithmetic is auditable at a glance.
+  const invTotals = useMemo(()=>invRows.reduce((t,r)=>({
+    starting:t.starting+num(r.inv.starting),added:t.added+r.added,returned:t.returned+r.returned,
+    sold:t.sold+r.sold,delivered:t.delivered+r.delivered,snd:t.snd+r.snd,avail:t.avail+r.avail
+  }),{starting:0,added:0,returned:0,sold:0,delivered:0,snd:0,avail:0}),[invRows]);
+
+  // Item 12: alphabetised + searchable product list for bulk add.
+  const bulkList = useMemo(()=>{
+    const q=bulkSearch.trim().toLowerCase();
+    return q?productsAZ.filter(p=>productDisplayName(p).toLowerCase().includes(q)):productsAZ;
+  },[productsAZ,bulkSearch]);
+
+  const openBulkModal=()=>{setBulkModal(true);setBulkDate(today());setBulkNote('');setBulkSelected({});setBulkQtys({});setBulkSearch('');};
   const toggleBulkProduct=(pid)=>{setBulkSelected(s=>({...s,[pid]:!s[pid]}));};
-  const selectAllBulk=()=>{const all={};allProducts.forEach(p=>{all[p.id]=true;});setBulkSelected(all);};
+  // Selects only what's currently VISIBLE. Selecting all 45 products while a search
+  // filter was active used to silently arm rows the user could not see.
+  const selectAllBulk=()=>{setBulkSelected(s=>{const n={...s};bulkList.forEach(p=>{n[p.id]=true;});return n;});};
   const clearAllBulk=()=>{setBulkSelected({});setBulkQtys({});};
   const setBulkQty=(pid,val)=>{setBulkQtys(q=>({...q,[pid]:val}));};
   const selectedCount=Object.values(bulkSelected).filter(Boolean).length;
@@ -803,12 +1119,13 @@ function InventoryScreen() {
         <div><h2>Inventory Management</h2><p>Track starting, added, and available inventory by product</p></div>
         <button className="btn btn-primary" onClick={openBulkModal}><Icon name="plus" size={14}/>Bulk Add Inventory</button>
       </div>
-      <div className="card"><div className="inv-table-wrap"><table>
+      <div className="card"><div className="inv-table-wrap"><table className="freeze-table">
         <thead><tr>
           <SortTh label="Product" colKey="name" sortKey={invSK} sortDir={invSD} onSort={invToggle}/>
           <SortTh label="Packaging" colKey="packaging" sortKey={invSK} sortDir={invSD} onSort={invToggle}/>
           <SortTh label="Starting" colKey="starting" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/>
           <SortTh label="Added" colKey="added" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/>
+          <SortTh label="Returned" colKey="returned" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/>
           <SortTh label="Total Sold" colKey="sold" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/>
           <SortTh label="Delivered" colKey="delivered" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/>
           <SortTh label="Sold, Not Del." colKey="snd" sortKey={invSK} sortDir={invSD} onSort={invToggle} style={{textAlign:'right'}}/>
@@ -817,13 +1134,24 @@ function InventoryScreen() {
         </tr></thead>
         <tbody>{invRows.map(p=>{
           return <tr key={p.id}>
-            <td style={{fontWeight:500}}>{p.name}</td>
+            {/* Item 10: product name opens every order containing this product */}
+            <td style={{fontWeight:500}}>
+              <a role="button" tabIndex={0} onClick={()=>setDrillProduct(p.id)} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();setDrillProduct(p.id);}}}
+                 style={{color:'var(--primary)',cursor:'pointer',textDecoration:'underline',textDecorationStyle:'dotted',textUnderlineOffset:3}}
+                 title="View all orders containing this product">{p.name}</a>
+            </td>
             <td>{p.packaging?<span className="tag" style={{background:p.packaging==='Tote'?'var(--purple-bg)':'var(--cyan-bg)',color:p.packaging==='Tote'?'var(--purple)':'var(--cyan)',fontSize:11}}>{p.packaging}</span>:<span style={{color:'var(--text-secondary)',fontSize:12}}>—</span>}</td>
-            <td className="inv-cell">{fmt(p.inv.starting)}</td>
+            <td className="inv-cell">{fmt(num(p.inv.starting))}</td>
             <td className="inv-cell positive">{p.added>0?'+'+fmt(p.added):'—'}{p.inv.additions.length>0&&<div style={{fontSize:10,color:'#94a3b8'}}>{p.inv.additions.length} addition{p.inv.additions.length>1?'s':''}</div>}</td>
+            <td className="inv-cell" style={{color:p.returned>0?'var(--cyan)':'inherit'}}>{p.returned>0?'+'+fmt(p.returned):'—'}</td>
             <td className="inv-cell">{fmt(p.sold)}</td>
             <td className="inv-cell" style={{color:'var(--success)'}}>{fmt(p.delivered)}</td>
-            <td className="inv-cell" style={{color:p.snd>0?'var(--warning)':'inherit',fontWeight:p.snd>0?600:400}}>{fmt(Math.max(0,p.snd))}</td>
+            {/* Was fmt(Math.max(0,p.snd)) — that clamp HID over-delivery. A negative value
+                here means more went out than was ordered: invoice it or weigh it back. */}
+            <td className="inv-cell" style={{color:p.snd>0?'var(--warning)':p.snd<0?'var(--danger)':'inherit',fontWeight:p.snd!==0?600:400}}
+                title={p.snd<0?'Over-delivered — needs invoice or weigh-back':''}>
+              {fmt(p.snd)}{p.snd<0&&<span style={{fontSize:9,display:'block',color:'var(--danger)'}}>over-delivered</span>}
+            </td>
             <td className={`inv-cell ${p.avail<0?'negative':'positive'}`} style={{fontWeight:700}}>{fmt(p.avail)}</td>
             <td style={{textAlign:'right',whiteSpace:'nowrap'}}>
               <button className="btn btn-sm btn-secondary" style={{marginRight:4}} onClick={()=>setEditModal(p.id)}><Icon name="edit" size={14}/>Edit</button>
@@ -831,7 +1159,21 @@ function InventoryScreen() {
             </td>
           </tr>;
         })}</tbody>
+        <tfoot><tr>
+          <td>TOTALS</td><td></td>
+          <td className="inv-cell">{fmt(invTotals.starting)}</td>
+          <td className="inv-cell">{invTotals.added>0?'+'+fmt(invTotals.added):'—'}</td>
+          <td className="inv-cell">{invTotals.returned>0?'+'+fmt(invTotals.returned):'—'}</td>
+          <td className="inv-cell">{fmt(invTotals.sold)}</td>
+          <td className="inv-cell">{fmt(invTotals.delivered)}</td>
+          <td className="inv-cell">{fmt(invTotals.snd)}</td>
+          <td className="inv-cell">{fmt(invTotals.avail)}</td>
+          <td></td>
+        </tr></tfoot>
       </table></div></div>
+
+      {/* Item 10: drill-down — all orders involving a product */}
+      {drillProduct&&<ProductOrdersModal productId={drillProduct} onClose={()=>setDrillProduct(null)} onNavigate={onNavigate}/>}
 
       {/* Single product add modal */}
       {addModal&&<Modal title={`Add Inventory — ${productDisplayName(allProducts.find(p=>p.id===addModal)||{name:addModal})}`} onClose={()=>setAddModal(null)}>
@@ -853,17 +1195,26 @@ function InventoryScreen() {
               <div className="form-group"><label>Date</label><input type="date" value={bulkDate} onChange={e=>setBulkDate(e.target.value)}/></div>
               <div className="form-group"><label>Note (optional)</label><input placeholder="e.g., Spring restock" value={bulkNote} onChange={e=>setBulkNote(e.target.value)}/></div>
             </div>
+            {/* Item 12: search box — 45+ products was unusable as a flat list */}
+            <div className="search-box" style={{marginBottom:10}}>
+              <Icon name="search"/>
+              <input placeholder="Search products to add individually..." value={bulkSearch} onChange={e=>setBulkSearch(e.target.value)}/>
+            </div>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-              <span style={{fontSize:13,fontWeight:600,color:'var(--text-secondary)'}}>{selectedCount} product{selectedCount!==1?'s':''} selected</span>
+              <span style={{fontSize:13,fontWeight:600,color:'var(--text-secondary)'}}>
+                {selectedCount} product{selectedCount!==1?'s':''} selected
+                {bulkSearch&&<span style={{fontWeight:400,marginLeft:6}}>· {bulkList.length} match{bulkList.length!==1?'es':''}</span>}
+              </span>
               <div style={{display:'flex',gap:8}}>
-                <button className="btn btn-sm btn-secondary" onClick={selectAllBulk}>Select All</button>
+                {/* Select All now applies to the VISIBLE (filtered) list, not the hidden full list */}
+                <button className="btn btn-sm btn-secondary" onClick={selectAllBulk}>Select {bulkSearch?'Matches':'All'}</button>
                 <button className="btn btn-sm btn-secondary" onClick={clearAllBulk}>Clear All</button>
               </div>
             </div>
             <div style={{maxHeight:400,overflowY:'auto',border:'1px solid var(--border)',borderRadius:6}}>
               <table>
                 <thead><tr><th style={{width:36}}></th><th>Product</th><th style={{textAlign:'right',width:100}}>Current Avail.</th><th style={{width:120}}>Add Qty</th></tr></thead>
-                <tbody>{allProducts.map(p=>{
+                <tbody>{bulkList.length===0?<tr><td colSpan="4" style={{textAlign:'center',padding:24,color:'var(--text-secondary)',fontSize:13}}>No products match "{bulkSearch}"</td></tr>:bulkList.map(p=>{
                   const avail=getProductAvailable(p.id);
                   const sel=!!bulkSelected[p.id];
                   return <tr key={p.id} style={{background:sel?'var(--primary-bg)':'transparent',cursor:'pointer'}} onClick={()=>toggleBulkProduct(p.id)}>
@@ -887,6 +1238,63 @@ function InventoryScreen() {
       {editModal&&<InventoryEditModal productId={editModal} onClose={()=>setEditModal(null)}/>}
     </div>
   );
+}
+
+// ── ITEM 10: PRODUCT → ALL ORDERS DRILL-DOWN ──
+// Clicking a product on the Inventory page opens every order that involves it,
+// with per-order delivered/remaining so you can see exactly where the stock is committed.
+function ProductOrdersModal({productId,onClose,onNavigate}) {
+  const {data,allProducts,getOrderDelivered,getProductAvailable,getProductTotalSold,getProductDelivered,activeYear,fyStart,fyLabel} = useApp();
+  const p = allProducts.find(x=>x.id===productId)||{name:productId,packaging:''};
+  const [allYears,setAllYears] = useState(false);
+
+  const rows = useMemo(()=>{
+    return data.orders
+      .filter(o=>num(o.products?.[productId])>0)
+      .filter(o=>allYears||getFiscalYear(o.date,fyStart,fyLabel)===activeYear)
+      .map(o=>{
+        const ordered=num(o.products[productId]);
+        const delivered=num(getOrderDelivered(o.id)[productId]);
+        return {...o,ordered,delivered,remaining:ordered-delivered};
+      })
+      .sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  },[data.orders,productId,allYears,activeYear,fyStart,fyLabel,getOrderDelivered]);
+
+  const totals = rows.reduce((t,r)=>({ordered:t.ordered+r.ordered,delivered:t.delivered+r.delivered,remaining:t.remaining+r.remaining}),{ordered:0,delivered:0,remaining:0});
+
+  return <Modal title={`Orders containing ${productDisplayName(p)}`} onClose={onClose} wide>
+    <div className="modal-body">
+      <div style={{display:'flex',gap:12,flexWrap:'wrap',marginBottom:14}}>
+        <div className="tag" style={{background:'var(--primary-bg)',color:'var(--primary)',fontSize:12,padding:'6px 12px'}}>Available: <strong style={{marginLeft:4}}>{fmt(getProductAvailable(productId))}</strong></div>
+        <div className="tag" style={{fontSize:12,padding:'6px 12px'}}>Total sold: <strong style={{marginLeft:4}}>{fmt(getProductTotalSold(productId))}</strong></div>
+        <div className="tag" style={{fontSize:12,padding:'6px 12px'}}>Delivered: <strong style={{marginLeft:4}}>{fmt(getProductDelivered(productId))}</strong></div>
+        <label style={{display:'flex',alignItems:'center',gap:6,fontSize:12,cursor:'pointer',marginLeft:'auto'}}>
+          <input type="checkbox" checked={allYears} onChange={e=>setAllYears(e.target.checked)} style={{width:'auto'}}/>Show all years
+        </label>
+      </div>
+      {rows.length===0
+        ? <p style={{color:'var(--text-secondary)',fontSize:13,padding:'20px 0',textAlign:'center'}}>No {allYears?'':activeYear+' '}orders contain this product.</p>
+        : <div className="inv-table-wrap" style={{maxHeight:'50vh'}}><table className="freeze-table">
+            <thead><tr><th>Customer</th><th>Order Date</th><th>Status</th><th style={{textAlign:'right'}}>Ordered</th><th style={{textAlign:'right'}}>Delivered</th><th style={{textAlign:'right'}}>Remaining</th></tr></thead>
+            <tbody>{rows.map(r=>{const st=getStatus(r.status);return <tr key={r.id} style={{cursor:onNavigate?'pointer':'default'}}
+                onClick={()=>{if(onNavigate){onClose();onNavigate('orders',{focusOrderId:r.id});}}}>
+              <td style={{fontWeight:500}}>{r.customer}</td>
+              <td>{fmtDate(r.date)}</td>
+              <td><span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span></td>
+              <td className="inv-cell">{fmt(r.ordered)}</td>
+              <td className="inv-cell" style={{color:'var(--success)'}}>{fmt(r.delivered)}</td>
+              <td className="inv-cell" style={{fontWeight:600,color:r.remaining>0?'var(--warning)':r.remaining<0?'var(--danger)':'var(--success)'}}>{fmt(r.remaining)}</td>
+            </tr>;})}</tbody>
+            <tfoot><tr>
+              <td>TOTALS</td><td></td><td></td>
+              <td className="inv-cell">{fmt(totals.ordered)}</td>
+              <td className="inv-cell">{fmt(totals.delivered)}</td>
+              <td className="inv-cell">{fmt(totals.remaining)}</td>
+            </tr></tfoot>
+          </table></div>}
+    </div>
+    <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Close</button></div>
+  </Modal>;
 }
 
 function InventoryEditModal({productId,onClose}) {
@@ -944,14 +1352,26 @@ function InventoryEditModal({productId,onClose}) {
 // ══════════════════════
 // ── ORDERS SCREEN ──
 // ══════════════════════
-function OrdersScreen({onNavigate}) {
-  const {data,allProducts,yearOrders,activeYear,setActiveYear,visibleYears,archivedYears,fyStart,fyLabel,deleteOrder,activeProducts} = useApp();
+function OrdersScreen({onNavigate,navArg}) {
+  const {data,allProducts,yearOrders,activeYear,setActiveYear,visibleYears,archivedYears,fyStart,fyLabel,deleteOrder,bulkUpdateOrders,activeProducts,isOrderFullyDelivered,getOrderDelivered} = useApp();
   const [showAdd,setShowAdd] = useState(false);
   const [filter,setFilter] = useState('all');
   const [search,setSearch] = useState('');
   const [editOrder,setEditOrder] = useState(null);
   const [showArchived,setShowArchived] = useState(false);
   const [viewMode,setViewMode] = useState('list'); // 'list' or 'matrix'
+  const [selected,setSelected] = useState({});         // item 4: bulk selection
+  const [deliverOrder,setDeliverOrder] = useState(null); // item 2: deliver from a row
+  const [invoiceFilter,setInvoiceFilter] = useState('all');
+  const [pickOrder,setPickOrder] = useState(null);       // matrix row → which order?
+
+  // Deep link from the Inventory drill-down: open the order that was clicked.
+  useEffect(()=>{
+    if(navArg&&navArg.focusOrderId){
+      const o=data.orders.find(x=>x.id===navArg.focusOrderId);
+      if(o) setEditOrder(o);
+    }
+  },[navArg,data.orders]);
   const {sortKey:olSK,sortDir:olSD,toggleSort:olToggle,sortFn:olSort} = useSort(null);
   const {sortKey:mSK,sortDir:mSD,toggleSort:mToggle,sortFn:mSort} = useSort('customer');
 
@@ -960,11 +1380,34 @@ function OrdersScreen({onNavigate}) {
   const filtered = useMemo(()=>{
     let orders=[...yearOrders];
     if(filter!=='all')orders=orders.filter(o=>o.status===filter);
+    if(invoiceFilter==='yes')orders=orders.filter(o=>o.invoiced);
+    if(invoiceFilter==='no')orders=orders.filter(o=>!o.invoiced);
     if(search)orders=orders.filter(o=>o.customer.toLowerCase().includes(search.toLowerCase()));
     if(!olSK) orders.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0));
-    else orders=olSort(orders,(o,k)=>{switch(k){case'customer':return o.customer;case'date':return o.date||'';case'products':return Object.keys(o.products).filter(x=>o.products[x]>0).length;case'status':return o.status;case'invoiced':return o.invoiced?1:0;default:return o.customer;}});
+    else orders=olSort(orders,(o,k)=>{switch(k){case'customer':return o.customer;case'date':return o.date||'';case'products':return Object.keys(o.products||{}).filter(x=>num(o.products[x])>0).length;case'status':return o.status;case'invoiced':return o.invoiced?1:0;default:return o.customer;}});
     return orders;
-  },[yearOrders,filter,search,olSK,olSD]);
+  },[yearOrders,filter,invoiceFilter,search,olSK,olSD]);
+
+  // ── ITEM 4: BULK SELECTION ──
+  // Selection is pruned to what's currently visible. Without this, filtering the list
+  // after selecting would leave invisible rows armed and a bulk action would silently
+  // mutate orders the user could no longer see.
+  const visibleIds = useMemo(()=>new Set(filtered.map(o=>o.id)),[filtered]);
+  const selectedIds = useMemo(()=>Object.keys(selected).filter(id=>selected[id]&&visibleIds.has(id)),[selected,visibleIds]);
+  const allVisibleSelected = filtered.length>0 && selectedIds.length===filtered.length;
+  const toggleAllVisible=()=>{
+    if(allVisibleSelected){setSelected({});return;}
+    const n={};filtered.forEach(o=>{n[o.id]=true;});setSelected(n);
+  };
+  const toggleOne=id=>setSelected(s=>({...s,[id]:!s[id]}));
+  const clearSelection=()=>setSelected({});
+  const applyBulk=(patch,label)=>{
+    if(selectedIds.length===0) return;
+    bulkUpdateOrders(selectedIds,patch);
+    clearSelection();
+  };
+  // Reset selection when switching year or view — stale IDs across contexts are a footgun.
+  useEffect(()=>{setSelected({});},[activeYear,viewMode]);
 
   // Spreadsheet view: determine which products are used across all visible orders
   const spreadsheetProducts = useMemo(()=>{
@@ -1015,19 +1458,52 @@ function OrdersScreen({onNavigate}) {
         {viewMode==='list'&&<div className="chip-select">
           <span className={`chip ${filter==='all'?'selected':''}`} onClick={()=>setFilter('all')}>All</span>
           {STATUS_OPTIONS.map(s=><span key={s.value} className={`chip ${filter===s.value?'selected':''}`} onClick={()=>setFilter(s.value)}>{s.label}</span>)}
+          <span style={{width:1,background:'var(--border)',margin:'0 4px'}}></span>
+          <span className={`chip ${invoiceFilter==='no'?'selected':''}`} onClick={()=>setInvoiceFilter(invoiceFilter==='no'?'all':'no')}>Not Invoiced</span>
+          <span className={`chip ${invoiceFilter==='yes'?'selected':''}`} onClick={()=>setInvoiceFilter(invoiceFilter==='yes'?'all':'yes')}>Invoiced</span>
         </div>}
       </div>
 
+      {/* ── ITEM 4: BULK ACTION BAR ── */}
+      {viewMode==='list'&&selectedIds.length>0&&<div className="card" style={{padding:'10px 16px',display:'flex',gap:10,alignItems:'center',flexWrap:'wrap',background:'var(--primary-bg)',border:'1px solid var(--primary-light)'}}>
+        <strong style={{fontSize:13,color:'var(--primary)'}}>{selectedIds.length} selected</strong>
+        <button className="btn btn-sm btn-success" onClick={()=>applyBulk({invoiced:true})}><Icon name="check" size={14}/>Mark Invoiced</button>
+        <button className="btn btn-sm btn-secondary" onClick={()=>applyBulk({invoiced:false})}>Mark Not Invoiced</button>
+        <div style={{display:'flex',alignItems:'center',gap:6,marginLeft:8}}>
+          <span style={{fontSize:12,color:'var(--text-secondary)'}}>Set status:</span>
+          <select defaultValue="" style={{width:'auto',padding:'5px 8px',fontSize:12}}
+            onChange={e=>{if(e.target.value){applyBulk({status:e.target.value});e.target.value='';}}}>
+            <option value="">-- choose --</option>
+            {STATUS_OPTIONS.map(s=><option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+        </div>
+        <button className="btn btn-sm btn-secondary" style={{marginLeft:'auto'}} onClick={clearSelection}>Clear</button>
+      </div>}
+
       {/* List View */}
-      {viewMode==='list'&&<div className="card" style={{padding:0}}><div className="inv-table-wrap"><table>
-        <thead><tr><SortTh label="Customer" colKey="customer" sortKey={olSK} sortDir={olSD} onSort={olToggle}/><SortTh label="Order Date" colKey="date" sortKey={olSK} sortDir={olSD} onSort={olToggle}/><SortTh label="Products" colKey="products" sortKey={olSK} sortDir={olSD} onSort={olToggle}/><SortTh label="Status" colKey="status" sortKey={olSK} sortDir={olSD} onSort={olToggle}/><SortTh label="Invoiced" colKey="invoiced" sortKey={olSK} sortDir={olSD} onSort={olToggle}/><th></th></tr></thead>
-        <tbody>{filtered.length===0?<tr><td colSpan="6" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No orders found</td></tr>:filtered.map(o=>{
-          const st=getStatus(o.status);const pc=Object.keys(o.products).filter(k=>o.products[k]>0).length;
-          return <tr key={o.id} style={{cursor:'pointer'}} onClick={()=>setEditOrder(o)}>
+      {viewMode==='list'&&<div className="card" style={{padding:0}}><div className="inv-table-wrap"><table className="freeze-table">
+        <thead><tr>
+          <th style={{width:36,textAlign:'center'}}><input type="checkbox" checked={allVisibleSelected} onChange={toggleAllVisible} style={{width:'auto',cursor:'pointer'}} title="Select all visible"/></th>
+          <SortTh label="Customer" colKey="customer" sortKey={olSK} sortDir={olSD} onSort={olToggle}/><SortTh label="Order Date" colKey="date" sortKey={olSK} sortDir={olSD} onSort={olToggle}/><SortTh label="Products" colKey="products" sortKey={olSK} sortDir={olSD} onSort={olToggle}/><SortTh label="Status" colKey="status" sortKey={olSK} sortDir={olSD} onSort={olToggle}/><SortTh label="Invoiced" colKey="invoiced" sortKey={olSK} sortDir={olSD} onSort={olToggle}/><th style={{textAlign:'right'}}>Actions</th></tr></thead>
+        <tbody>{filtered.length===0?<tr><td colSpan="7" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No orders found</td></tr>:filtered.map(o=>{
+          const st=getStatus(o.status);const pc=Object.keys(o.products||{}).filter(k=>num(o.products[k])>0).length;
+          const done=isOrderFullyDelivered(o.id);
+          const isSel=!!selected[o.id];
+          return <tr key={o.id} className={isSel?'row-sel':''} style={{cursor:'pointer',background:isSel?'var(--primary-bg)':undefined}} onClick={()=>setEditOrder(o)}>
+            <td style={{textAlign:'center'}} onClick={e=>e.stopPropagation()}>
+              <input type="checkbox" checked={isSel} onChange={()=>toggleOne(o.id)} style={{width:'auto',cursor:'pointer'}}/>
+            </td>
             <td style={{fontWeight:500}}>{o.customer}</td><td>{fmtDate(o.date)}</td><td><span className="tag">{pc} product{pc!==1?'s':''}</span></td>
             <td><span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span></td>
-            <td>{o.invoiced?<span style={{color:'var(--success)'}}>Yes</span>:'No'}</td>
-            <td style={{textAlign:'right'}}><button className="btn-icon" style={{marginRight:4}} onClick={e=>{e.stopPropagation();setEditOrder(o);}}><Icon name="edit" size={14}/></button><button className="btn-icon" onClick={e=>{e.stopPropagation();if(confirm('Delete?'))deleteOrder(o.id);}}><Icon name="trash" size={14}/></button></td>
+            <td>{o.invoiced?<span style={{color:'var(--success)',fontWeight:600}}>Yes</span>:'No'}</td>
+            <td style={{textAlign:'right',whiteSpace:'nowrap'}} onClick={e=>e.stopPropagation()}>
+              {/* ── ITEM 2: deliver straight from the order row ── */}
+              <button className="btn btn-sm btn-success" style={{marginRight:4}} disabled={done}
+                title={done?'Fully delivered':'Create a delivery for this order'}
+                onClick={()=>setDeliverOrder(o)}><Icon name="truck" size={14}/>{done?'Delivered':'Deliver'}</button>
+              <button className="btn-icon" style={{marginRight:4}} onClick={()=>setEditOrder(o)}><Icon name="edit" size={14}/></button>
+              <button className="btn-icon" onClick={()=>{if(confirm(`Delete ${o.customer}'s order? This cannot be undone.`))deleteOrder(o.id);}}><Icon name="trash" size={14}/></button>
+            </td>
           </tr>;
         })}</tbody>
       </table></div></div>}
@@ -1055,7 +1531,15 @@ function OrdersScreen({onNavigate}) {
             <tbody>
               {spreadsheetRows.length===0?<tr><td colSpan={spreadsheetProducts.length+2} style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No orders found</td></tr>:spreadsheetRows.map((r,ri)=>{
                 const st=getStatus(r.status);const bg=ri%2===0?'#fff':'#f8fafc';
-                return <tr key={r.customer} style={{cursor:'pointer',background:bg}} onClick={()=>{const o=yearOrders.find(o2=>o2.customer===r.customer);if(o)setEditOrder(o);}}>
+                // BUGFIX: was `yearOrders.find(o2=>o2.customer===r.customer)` — a matrix row
+                // AGGREGATES every order for that customer, so .find() always opened the first
+                // one and edits silently landed on the wrong order. Now: open directly when
+                // there's exactly one, otherwise show a picker.
+                return <tr key={r.customer} style={{cursor:'pointer',background:bg}} onClick={()=>{
+                  const os=yearOrders.filter(o2=>o2.customer===r.customer);
+                  if(os.length===1) setEditOrder(os[0]);
+                  else if(os.length>1) setPickOrder({customer:r.customer,orders:os});
+                }}>
                   <td style={{fontWeight:500,position:'sticky',left:0,background:bg,zIndex:1,borderRight:'2px solid var(--border)',whiteSpace:'nowrap',padding:'6px 10px'}}>{r.customer}{r.orderCount>1&&<span style={{fontSize:9,color:'var(--text-secondary)',marginLeft:4}}>({r.orderCount})</span>}</td>
                   <td style={{textAlign:'center'}}><span className={`status-dot ${st.dot}`} title={st.label} style={{display:'inline-block'}}></span></td>
                   {spreadsheetProducts.map(p=>{const v=r.products[p.id];return <td key={p.id} className="inv-cell" style={{fontSize:11,padding:'6px 8px',color:v?'var(--text)':'#cbd5e1'}}>{v?fmt(v):'—'}</td>;})}
@@ -1071,13 +1555,34 @@ function OrdersScreen({onNavigate}) {
         </div>
       </div>}
 
-      {(showAdd||editOrder)&&<OrderModal order={editOrder} onClose={()=>{setShowAdd(false);setEditOrder(null);}}/>}
+      {(showAdd||editOrder)&&<OrderModal order={editOrder} onClose={()=>{setShowAdd(false);setEditOrder(null);}} onDeliver={o=>{setEditOrder(null);setShowAdd(false);setDeliverOrder(o);}}/>}
+
+      {/* Matrix row with multiple orders — pick which one to open (defect 7) */}
+      {pickOrder&&<Modal title={`${pickOrder.customer} — ${pickOrder.orders.length} orders`} onClose={()=>setPickOrder(null)}>
+        <div className="modal-body">
+          <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:12}}>This customer has more than one order this year. Choose which to open:</p>
+          <div style={{border:'1px solid var(--border)',borderRadius:6,overflow:'hidden'}}>
+            {pickOrder.orders.map(o=>{const st=getStatus(o.status);const pc=Object.keys(o.products||{}).filter(k=>num(o.products[k])>0).length;
+              return <div key={o.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid #f1f5f9'}}
+                onClick={()=>{setEditOrder(o);setPickOrder(null);}}>
+                <span style={{flex:1,fontWeight:500}}>{fmtDate(o.date)}</span>
+                <span className="tag">{pc} product{pc!==1?'s':''}</span>
+                <span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span>
+              </div>;})}
+          </div>
+        </div>
+        <div className="modal-footer"><button className="btn btn-secondary" onClick={()=>setPickOrder(null)}>Cancel</button></div>
+      </Modal>}
+
+      {/* Item 2: delivery launched from an order row, pre-scoped to that order */}
+      {deliverOrder&&<NewDeliveryModal presetOrderId={deliverOrder.id} onClose={()=>setDeliverOrder(null)}/>}
     </div>
   );
 }
 
-function OrderModal({order,onClose}) {
-  const {allProducts,allCustomers,addOrder,updateOrder,addCustomer,showToast} = useApp();
+function OrderModal({order,onClose,onDeliver}) {
+  const {allProducts,productsAZ,allCustomers,addOrder,updateOrder,addCustomer,showToast,isOrderFullyDelivered} = useApp();
+  const [prodSearch,setProdSearch] = useState('');   // item 6: product search
   const [customer,setCustomer] = useState(order?.customer||'');
   const [date,setDate] = useState(order?.date||today());
   const [status,setStatus] = useState(order?.status||'pending');
@@ -1088,7 +1593,16 @@ function OrderModal({order,onClose}) {
   const [showAddCust,setShowAddCust] = useState(false);
   const [newCustName,setNewCustName] = useState('');
   const filteredCust=allCustomers.filter(c=>c.toLowerCase().includes(custSearch.toLowerCase()));
-  const setProduct=(pid,val)=>{const v=parseFloat(val)||0;setProducts(p=>v>0?{...p,[pid]:v}:Object.fromEntries(Object.entries(p).filter(([k])=>k!==pid)));};
+  const setProduct=(pid,val)=>{const v=num(val);setProducts(p=>v>0?{...p,[pid]:v}:Object.fromEntries(Object.entries(p).filter(([k])=>k!==pid)));};
+
+  // Item 6: products split into "already on the order" (always visible) and
+  // "available to add" (searchable), both sorted A-Z via productsAZ.
+  const selectedProducts = useMemo(()=>productsAZ.filter(p=>num(products[p.id])>0),[productsAZ,products]);
+  const availableProducts = useMemo(()=>{
+    const q=prodSearch.trim().toLowerCase();
+    const pool=productsAZ.filter(p=>!(num(products[p.id])>0));
+    return q?pool.filter(p=>productDisplayName(p).toLowerCase().includes(q)):pool;
+  },[productsAZ,products,prodSearch]);
   const save=()=>{if(!customer){alert('Select a customer');return;}if(Object.keys(products).length===0){alert('Add at least one product');return;}if(order){updateOrder(order.id,{customer,date,status,invoiced,products});showToast('Order updated');}else addOrder({customer,date,status,invoiced,products});onClose();};
   return <Modal title={order?'Edit Order':'New Order'} onClose={onClose} wide>
     <div className="modal-body">
@@ -1102,23 +1616,48 @@ function OrderModal({order,onClose}) {
         <div className="form-group"><label>Status</label><select value={status} onChange={e=>setStatus(e.target.value)}>{STATUS_OPTIONS.map(s=><option key={s.value} value={s.value}>{s.label}</option>)}</select></div>
         <div className="form-group" style={{display:'flex',alignItems:'flex-end',paddingBottom:8}}><label style={{display:'flex',alignItems:'center',gap:8,cursor:'pointer'}}><input type="checkbox" checked={invoiced} onChange={e=>setInvoiced(e.target.checked)} style={{width:'auto'}}/>Invoiced</label></div>
       </div>
+      {/* ── ITEM 6: SEARCHABLE, ALPHABETICALLY SORTED PRODUCT PICKER ──
+          Previously rendered all ~45 products in DEFAULT_PRODUCTS (spreadsheet) order
+          with no filter, so finding one meant scanning the whole grid by eye. */}
       <h4 style={{fontSize:14,fontWeight:600,margin:'16px 0 8px'}}>Products & Quantities</h4>
-      {order&&<div style={{marginBottom:8}}>
+
+      {/* Selected products always render first, so an active search never hides
+          quantities the user has already entered. */}
+      {selectedProducts.length>0&&<div style={{marginBottom:12}}>
+        <p style={{fontSize:11,fontWeight:600,color:'var(--text-secondary)',marginBottom:6,textTransform:'uppercase',letterSpacing:.5}}>On this order ({selectedProducts.length})</p>
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:8}}>
-          {allProducts.filter(p=>products[p.id]>0).map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontSize:12,flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{productDisplayName(p)}</span><input type="number" step="0.1" style={{width:80}} placeholder="0" value={products[p.id]||''} onChange={e=>setProduct(p.id,e.target.value)}/></div>)}
+          {selectedProducts.map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:8}}>
+            <span style={{fontSize:12,flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontWeight:500}}>{productDisplayName(p)}</span>
+            <input type="number" step="0.1" min="0" style={{width:80}} placeholder="0" value={products[p.id]||''} onChange={e=>setProduct(p.id,e.target.value)}/>
+            <button className="btn-icon" title="Remove" onClick={()=>setProduct(p.id,0)} style={{padding:4}}><Icon name="x" size={12}/></button>
+          </div>)}
         </div>
-        {showAllProducts?<div style={{marginTop:8,paddingTop:8,borderTop:'1px dashed var(--border)'}}>
-          <p style={{fontSize:11,color:'var(--text-secondary)',marginBottom:6}}>Add more products:</p>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:8}}>
-            {allProducts.filter(p=>!products[p.id]||products[p.id]<=0).map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontSize:12,flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:'var(--text-secondary)'}}>{productDisplayName(p)}</span><input type="number" step="0.1" style={{width:80}} placeholder="0" value={products[p.id]||''} onChange={e=>setProduct(p.id,e.target.value)}/></div>)}
-          </div>
-        </div>:<button className="btn btn-sm btn-secondary" style={{marginTop:8}} onClick={()=>setShowAllProducts(true)}><Icon name="plus" size={14}/>Add More Products</button>}
       </div>}
-      {!order&&<div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:8}}>
-        {allProducts.map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:8}}><span style={{fontSize:12,flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{productDisplayName(p)}</span><input type="number" step="0.1" style={{width:80}} placeholder="0" value={products[p.id]||''} onChange={e=>setProduct(p.id,e.target.value)}/></div>)}
-      </div>}
+
+      <div className="search-box" style={{marginBottom:8}}>
+        <Icon name="search"/>
+        <input placeholder="Type a product name to find it..." value={prodSearch} onChange={e=>setProdSearch(e.target.value)}/>
+      </div>
+      <div style={{maxHeight:260,overflowY:'auto',border:'1px solid var(--border)',borderRadius:6,padding:8}}>
+        {availableProducts.length===0
+          ? <p style={{fontSize:12,color:'var(--text-secondary)',textAlign:'center',padding:16}}>
+              {prodSearch?`No products match "${prodSearch}"`:'All products are already on this order.'}</p>
+          : <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:8}}>
+              {availableProducts.map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:8}}>
+                <span style={{fontSize:12,flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:'var(--text-secondary)'}}>{productDisplayName(p)}</span>
+                <input type="number" step="0.1" min="0" style={{width:80}} placeholder="0" value={products[p.id]||''} onChange={e=>setProduct(p.id,e.target.value)}/>
+              </div>)}
+            </div>}
+      </div>
     </div>
-    <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={save}>{order?'Save Changes':'Create Order'}</button></div>
+    <div className="modal-footer">
+      <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+      {/* Item 2: deliver directly from inside an order */}
+      {order&&onDeliver&&<button className="btn btn-success" disabled={isOrderFullyDelivered(order.id)}
+        title={isOrderFullyDelivered(order.id)?'This order is fully delivered':'Create a delivery for this order'}
+        onClick={()=>onDeliver(order)}><Icon name="truck" size={14}/>Deliver</button>}
+      <button className="btn btn-primary" onClick={save}>{order?'Save Changes':'Create Order'}</button>
+    </div>
   </Modal>;
 }
 
@@ -1126,18 +1665,29 @@ function OrderModal({order,onClose}) {
 // ── CUSTOMERS SCREEN ──
 // ══════════════════════════
 function CustomersScreen({onNavigate}) {
-  const {data,allProducts,allCustomers,activeCustomers,addCustomer,showToast} = useApp();
+  const {data,allProducts,allCustomers,activeCustomers,addCustomer,setCustomerMeta,equipmentByCustomer,showToast} = useApp();
   const [showAddCustomer,setShowAddCustomer] = useState(false);
   const [newCustName,setNewCustName] = useState('');
+  const [newCustPhone,setNewCustPhone] = useState('');
   const [search,setSearch] = useState('');
+  const [editPhone,setEditPhone] = useState(null);   // item 5.1
   const {sortKey:cSK,sortDir:cSD,toggleSort:cToggle,sortFn:cSort} = useSort('name');
-  const customerData=useMemo(()=>activeCustomers.map(name=>{
-    const orders=data.orders.filter(o=>o.customer===name);const tp={};orders.forEach(o=>{Object.entries(o.products).forEach(([pid,qty])=>{tp[pid]=(tp[pid]||0)+qty;});});
-    const group=data.customerGroups.find(g=>g.members.includes(name));const latest=orders.sort((a,b)=>new Date(b.date||0)-new Date(a.date||0))[0];
-    return{name,orders,totalProducts:tp,group:group?.name||null,latest,latestDate:latest?.date||'',latestStatus:latest?latest.status:'pending'};
-  }).filter(c=>c.name.toLowerCase().includes(search.toLowerCase())),[activeCustomers,data,search]);
 
-  const sortedCustomers=useMemo(()=>cSort(customerData,(c,k)=>{switch(k){case'name':return c.name;case'group':return c.group||'';case'orders':return c.orders.length;case'latest':return c.latestDate;case'status':return c.latestStatus;default:return c.name;}}),[customerData,cSK,cSD]);
+  const pumpsByCustomer=useMemo(()=>{const m={};equipmentByCustomer.forEach(r=>{m[r.customer]=r;});return m;},[equipmentByCustomer]);
+
+  const customerData=useMemo(()=>activeCustomers.map(name=>{
+    const orders=data.orders.filter(o=>o.customer===name);const tp={};
+    orders.forEach(o=>{Object.entries(o.products||{}).forEach(([pid,qty])=>{tp[pid]=(tp[pid]||0)+num(qty);});});
+    const group=data.customerGroups.find(g=>g.members.includes(name));
+    // Copy before sorting — .sort() mutates in place, and mutating a memo input
+    // makes the render order depend on how many times the memo happened to run.
+    const latest=[...orders].sort((a,b)=>new Date(b.date||0)-new Date(a.date||0))[0];
+    const eq=pumpsByCustomer[name];
+    return{name,orders,totalProducts:tp,group:group?.name||null,latest,latestDate:latest?.date||'',latestStatus:latest?latest.status:'pending',
+           phone:(data.customerMeta||{})[name]?.phone||'',pumpsHeld:eq?eq.pumpsHeld:0,pumpsOut:eq?eq.pumpsOut:0};
+  }).filter(c=>c.name.toLowerCase().includes(search.toLowerCase())),[activeCustomers,data,search,pumpsByCustomer]);
+
+  const sortedCustomers=useMemo(()=>cSort(customerData,(c,k)=>{switch(k){case'name':return c.name;case'group':return c.group||'';case'phone':return c.phone||'';case'orders':return c.orders.length;case'latest':return c.latestDate;case'status':return c.latestStatus;case'pumps':return c.pumpsHeld;default:return c.name;}}),[customerData,cSK,cSD]);
 
   const groupData=useMemo(()=>data.customerGroups.map(g=>{
     const members=sortedCustomers.filter(c=>g.members.includes(c.name));const tp={};members.forEach(m=>{Object.entries(m.totalProducts).forEach(([pid,qty])=>{tp[pid]=(tp[pid]||0)+qty;});});
@@ -1147,57 +1697,172 @@ function CustomersScreen({onNavigate}) {
   return <div className="fade-in">
     <div className="page-header" style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
       <div><h2>Customers</h2><p>View customer orders and group totals</p></div>
-      <button className="btn btn-primary" onClick={()=>{setShowAddCustomer(true);setNewCustName('');}}><Icon name="plus" size={16}/>Add Customer</button>
+      <button className="btn btn-primary" onClick={()=>{setShowAddCustomer(true);setNewCustName('');setNewCustPhone('');}}><Icon name="plus" size={16}/>Add Customer</button>
     </div>
     {showAddCustomer&&<Modal title="Add New Customer" onClose={()=>setShowAddCustomer(false)}>
-      <div className="modal-body"><div className="form-group"><label>Customer Name</label><input value={newCustName} onChange={e=>setNewCustName(e.target.value)} placeholder="Enter customer name"/></div>
-        {newCustName&&allCustomers.includes(newCustName)&&<p style={{fontSize:12,color:'var(--danger)'}}>Customer already exists</p>}
+      <div className="modal-body">
+        <div className="form-group"><label>Customer Name</label><input value={newCustName} onChange={e=>setNewCustName(e.target.value)} placeholder="Enter customer name" autoFocus/></div>
+        <div className="form-group"><label>Phone Number (optional)</label><input type="tel" value={newCustPhone} onChange={e=>setNewCustPhone(e.target.value)} placeholder="(402) 555-0123"/></div>
+        {newCustName&&allCustomers.includes(newCustName.trim())&&<p style={{fontSize:12,color:'var(--danger)'}}>Customer already exists</p>}
       </div>
-      <div className="modal-footer"><button className="btn btn-secondary" onClick={()=>setShowAddCustomer(false)}>Cancel</button><button className="btn btn-primary" disabled={!newCustName.trim()||allCustomers.includes(newCustName)} onClick={()=>{addCustomer(newCustName.trim());setShowAddCustomer(false);}}>Add Customer</button></div>
+      <div className="modal-footer"><button className="btn btn-secondary" onClick={()=>setShowAddCustomer(false)}>Cancel</button>
+        <button className="btn btn-primary" disabled={!newCustName.trim()||allCustomers.includes(newCustName.trim())}
+          onClick={()=>{const n=newCustName.trim();addCustomer(n);if(newCustPhone.trim())setCustomerMeta(n,{phone:newCustPhone.trim()});setShowAddCustomer(false);setNewCustPhone('');}}>Add Customer</button></div>
     </Modal>}
     <div className="card" style={{padding:'12px 16px'}}><div className="search-box"><Icon name="search"/><input placeholder="Search customers..." value={search} onChange={e=>setSearch(e.target.value)}/></div></div>
-    {groupData.map(g=><div key={g.name} className="card"><div className="card-header"><h3 style={{color:'var(--primary)'}}>{g.name} Group</h3><span className="tag">{g.members.length} members</span></div>
-      <table><thead><tr><SortTh label="Customer" colKey="name" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Orders" colKey="orders" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Latest Date" colKey="latest" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Status" colKey="status" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><th></th></tr></thead><tbody>
-        {g.members.map(m=>{const st=m.latest?getStatus(m.latest.status):getStatus('pending');return <tr key={m.name} style={{cursor:'pointer'}} onClick={()=>onNavigate('customer-detail',m.name)}><td style={{fontWeight:500}}>{m.name}</td><td>{m.orders.length}</td><td>{m.latest?fmtDate(m.latest.date):'—'}</td><td><span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span></td><td style={{textAlign:'right'}}><Icon name="chevron" size={16}/></td></tr>;})}
-        <tr className="group-row"><td>{g.name} Total</td><td>{g.members.reduce((s,m)=>s+m.orders.length,0)}</td><td colSpan="3">{Object.entries(g.totalProducts).filter(([,v])=>v>0).slice(0,5).map(([pid,qty])=>{const p=allProducts.find(x=>x.id===pid);return <span key={pid} className="tag" style={{marginRight:4}}>{productDisplayName(p||{name:pid})}: {fmt(qty)}</span>;})}</td></tr>
-      </tbody></table>
-    </div>)}
-    <div className="card"><div className="card-header"><h3>All Customers</h3></div><table><thead><tr><SortTh label="Customer" colKey="name" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Group" colKey="group" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Orders" colKey="orders" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Latest" colKey="latest" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><SortTh label="Status" colKey="status" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><th></th></tr></thead><tbody>
-      {sortedCustomers.map(c=>{const st=c.latest?getStatus(c.latest.status):getStatus('pending');return <tr key={c.name} style={{cursor:'pointer'}} onClick={()=>onNavigate('customer-detail',c.name)}><td style={{fontWeight:500}}>{c.name}</td><td>{c.group?<span className="tag" style={{background:'var(--primary-bg)',color:'var(--primary)'}}>{c.group}</span>:'—'}</td><td>{c.orders.length}</td><td>{c.latest?fmtDate(c.latest.date):'—'}</td><td><span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span></td><td style={{textAlign:'right'}}><Icon name="chevron" size={16}/></td></tr>;})}
-    </tbody></table></div>
+
+    {/* ── ITEM 5: All Customers first; groups moved BELOW ── */}
+    <div className="card" style={{padding:0}}><div className="card-header" style={{padding:'14px 16px'}}><h3>All Customers</h3><span className="tag">{sortedCustomers.length}</span></div>
+      <div className="inv-table-wrap"><table className="freeze-table"><thead><tr>
+        <SortTh label="Customer" colKey="name" sortKey={cSK} sortDir={cSD} onSort={cToggle}/>
+        <SortTh label="Phone" colKey="phone" sortKey={cSK} sortDir={cSD} onSort={cToggle}/>
+        <SortTh label="Group" colKey="group" sortKey={cSK} sortDir={cSD} onSort={cToggle}/>
+        <SortTh label="Orders" colKey="orders" sortKey={cSK} sortDir={cSD} onSort={cToggle}/>
+        <SortTh label="Pumps Out" colKey="pumps" sortKey={cSK} sortDir={cSD} onSort={cToggle} style={{textAlign:'right'}}/>
+        <SortTh label="Latest" colKey="latest" sortKey={cSK} sortDir={cSD} onSort={cToggle}/>
+        <SortTh label="Status" colKey="status" sortKey={cSK} sortDir={cSD} onSort={cToggle}/><th></th></tr></thead><tbody>
+      {sortedCustomers.map(c=>{const st=c.latest?getStatus(c.latest.status):getStatus('pending');
+        return <tr key={c.name} style={{cursor:'pointer'}} onClick={()=>onNavigate('customer-detail',c.name)}>
+          <td style={{fontWeight:500}}>{c.name}</td>
+          {/* Item 5.1: phone, inline-editable without leaving the list */}
+          <td onClick={e=>e.stopPropagation()}>
+            {c.phone
+              ? <a href={`tel:${c.phone.replace(/[^0-9+]/g,'')}`} style={{color:'var(--primary)',textDecoration:'none'}} title="Call">{c.phone}</a>
+              : <span style={{color:'#cbd5e1',fontSize:12}}>—</span>}
+            <button className="btn-icon" style={{marginLeft:6,padding:3}} title="Edit phone" onClick={()=>setEditPhone(c.name)}><Icon name="edit" size={11}/></button>
+          </td>
+          <td>{c.group?<span className="tag" style={{background:'var(--primary-bg)',color:'var(--primary)'}}>{c.group}</span>:'—'}</td>
+          <td>{c.orders.length}</td>
+          <td className="inv-cell" style={{color:c.pumpsHeld>0?'var(--orange)':'inherit',fontWeight:c.pumpsHeld>0?600:400}}>{c.pumpsHeld>0?fmt(c.pumpsHeld):'—'}</td>
+          <td>{c.latest?fmtDate(c.latest.date):'—'}</td>
+          <td><span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span></td>
+          <td style={{textAlign:'right'}}><Icon name="chevron" size={16}/></td>
+        </tr>;})}
+    </tbody></table></div></div>
+
+    {/* Groups now render at the BOTTOM of the page (item 5) */}
+    {groupData.length>0&&<div style={{marginTop:24,paddingTop:8,borderTop:'2px solid var(--border)'}}>
+      <h3 style={{fontSize:15,fontWeight:600,color:'var(--text-secondary)',margin:'12px 0',textTransform:'uppercase',letterSpacing:.5}}>Customer Groups</h3>
+      {groupData.map(g=><div key={g.name} className="card" style={{padding:0}}>
+        <div className="card-header" style={{padding:'14px 16px'}}><h3 style={{color:'var(--primary)'}}>{g.name} Group</h3><span className="tag">{g.members.length} members</span></div>
+        <div className="inv-table-wrap"><table className="freeze-table"><thead><tr><th>Customer</th><th>Phone</th><th>Orders</th><th style={{textAlign:'right'}}>Pumps Out</th><th>Latest Date</th><th>Status</th><th></th></tr></thead><tbody>
+          {g.members.map(m=>{const st=m.latest?getStatus(m.latest.status):getStatus('pending');
+            return <tr key={m.name} style={{cursor:'pointer'}} onClick={()=>onNavigate('customer-detail',m.name)}>
+              <td style={{fontWeight:500}}>{m.name}</td>
+              <td>{m.phone||<span style={{color:'#cbd5e1',fontSize:12}}>—</span>}</td>
+              <td>{m.orders.length}</td>
+              <td className="inv-cell">{m.pumpsHeld>0?fmt(m.pumpsHeld):'—'}</td>
+              <td>{m.latest?fmtDate(m.latest.date):'—'}</td>
+              <td><span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span></td>
+              <td style={{textAlign:'right'}}><Icon name="chevron" size={16}/></td></tr>;})}
+          <tr className="group-row"><td>{g.name} Total</td><td></td><td>{g.members.reduce((s,m)=>s+m.orders.length,0)}</td>
+            <td className="inv-cell">{fmt(g.members.reduce((s,m)=>s+m.pumpsHeld,0))}</td>
+            <td colSpan="3">{Object.entries(g.totalProducts).filter(([,v])=>v>0).slice(0,5).map(([pid,qty])=>{const p=allProducts.find(x=>x.id===pid);return <span key={pid} className="tag" style={{marginRight:4}}>{productDisplayName(p||{name:pid})}: {fmt(qty)}</span>;})}</td></tr>
+        </tbody></table></div>
+      </div>)}
+    </div>}
+
+    {/* Item 5.1: phone editor */}
+    {editPhone&&<PhoneModal customerName={editPhone} onClose={()=>setEditPhone(null)}/>}
   </div>;
 }
 
-function CustomerDetail({customerName,onBack}) {
-  const {data,allProducts,updateOrder} = useApp();
-  const orders=data.orders.filter(o=>o.customer===customerName);const group=data.customerGroups.find(g=>g.members.includes(customerName));const deliveries=data.deliveries.filter(d=>d.customer===customerName);
-  const tp={};orders.forEach(o=>{Object.entries(o.products).forEach(([pid,qty])=>{tp[pid]=(tp[pid]||0)+qty;});});
+// ── ITEM 5.1: CUSTOMER PHONE ──
+function PhoneModal({customerName,onClose}) {
+  const {data,setCustomerMeta,showToast} = useApp();
+  const meta=(data.customerMeta||{})[customerName]||{};
+  const [phone,setPhone] = useState(meta.phone||'');
+  const [email,setEmail] = useState(meta.email||'');
+  const [notes,setNotes] = useState(meta.notes||'');
+  const save=()=>{setCustomerMeta(customerName,{phone:phone.trim(),email:email.trim(),notes:notes.trim()});showToast('Contact saved');onClose();};
+  return <Modal title={`Contact — ${customerName}`} onClose={onClose}>
+    <div className="modal-body">
+      <div className="form-group"><label>Phone Number</label>
+        <input type="tel" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="(402) 555-0123" autoFocus/></div>
+      <div className="form-group"><label>Email (optional)</label>
+        <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="name@farm.com"/></div>
+      <div className="form-group"><label>Notes (optional)</label>
+        <textarea rows="3" value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Gate code, delivery instructions, best time to call..."/></div>
+    </div>
+    <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Cancel</button><button className="btn btn-primary" onClick={save}>Save Contact</button></div>
+  </Modal>;
+}
+
+function CustomerDetail({customerName,onBack,onNavigate}) {
+  const {data,allProducts,updateOrder,equipmentByCustomer} = useApp();
+  const [editPhone,setEditPhone] = useState(false);
+  const orders=data.orders.filter(o=>o.customer===customerName);
+  const group=data.customerGroups.find(g=>g.members.includes(customerName));
+  const deliveries=data.deliveries.filter(d=>d.customer===customerName);
+  const returns=(data.returns||[]).filter(r=>r.customer===customerName);
+  const meta=(data.customerMeta||{})[customerName]||{};
+  const eq=equipmentByCustomer.find(r=>r.customer===customerName);
+  const tp={};orders.forEach(o=>{Object.entries(o.products||{}).forEach(([pid,qty])=>{tp[pid]=(tp[pid]||0)+num(qty);});});
   const usedProducts=allProducts.filter(p=>tp[p.id]>0);
   return <div className="fade-in">
-    <div className="page-header" style={{display:'flex',alignItems:'center',gap:12}}><button className="btn-icon" onClick={onBack}><Icon name="back"/></button><div><h2>{customerName}</h2><p>{group?<span className="tag" style={{background:'var(--primary-bg)',color:'var(--primary)'}}>{group.name} Group</span>:null} {orders.length} order{orders.length!==1?'s':''}</p></div></div>
-    <div className="card"><div className="card-header"><h3>Orders</h3></div><div className="inv-table-wrap"><table>
+    <div className="page-header" style={{display:'flex',alignItems:'center',gap:12}}><button className="btn-icon" onClick={onBack}><Icon name="back"/></button>
+      <div style={{flex:1}}><h2>{customerName}</h2>
+        <p style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
+          {group?<span className="tag" style={{background:'var(--primary-bg)',color:'var(--primary)'}}>{group.name} Group</span>:null}
+          <span>{orders.length} order{orders.length!==1?'s':''}</span>
+          {/* Item 5.1 */}
+          {meta.phone
+            ? <a href={`tel:${meta.phone.replace(/[^0-9+]/g,'')}`} className="tag" style={{background:'var(--success-bg)',color:'var(--success)',textDecoration:'none'}}>{meta.phone}</a>
+            : <span className="tag" style={{cursor:'pointer'}} onClick={()=>setEditPhone(true)}>+ Add phone</span>}
+          <button className="btn-icon" style={{padding:3}} title="Edit contact" onClick={()=>setEditPhone(true)}><Icon name="edit" size={11}/></button>
+        </p>
+      </div>
+    </div>
+
+    {/* Item 13: per-customer pump total */}
+    {eq&&(eq.pumpsOut>0||eq.totesOut>0)&&<div className="card" style={{padding:'12px 16px',display:'flex',gap:20,flexWrap:'wrap'}}>
+      <div><div style={{fontSize:11,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:.5}}>Pumps Out</div><div style={{fontSize:20,fontWeight:700,color:eq.pumpsHeld>0?'var(--orange)':'var(--success)'}}>{fmt(eq.pumpsHeld)}</div></div>
+      <div><div style={{fontSize:11,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:.5}}>Pumps Returned</div><div style={{fontSize:20,fontWeight:700}}>{fmt(eq.pumpsReturned)} <span style={{fontSize:12,fontWeight:400,color:'var(--text-secondary)'}}>of {fmt(eq.pumpsOut)}</span></div></div>
+      <div><div style={{fontSize:11,color:'var(--text-secondary)',textTransform:'uppercase',letterSpacing:.5}}>Totes Out</div><div style={{fontSize:20,fontWeight:700,color:eq.totesHeld>0?'var(--purple)':'var(--success)'}}>{fmt(eq.totesHeld)}</div></div>
+    </div>}
+
+    <div className="card" style={{padding:0}}><div className="card-header" style={{padding:'14px 16px'}}><h3>Orders</h3></div><div className="inv-table-wrap"><table className="freeze-table">
       <thead><tr><th>Date</th><th>Status</th>{usedProducts.map(p=><th key={p.id} className="product-col" style={{textAlign:'right',fontSize:10}}>{productDisplayName(p)}</th>)}</tr></thead>
-      <tbody>{orders.map(o=><tr key={o.id}><td>{fmtDate(o.date)}</td><td><select value={o.status} onChange={e=>updateOrder(o.id,{status:e.target.value})} style={{width:'auto',padding:'3px 6px',fontSize:11}}>{STATUS_OPTIONS.map(s=><option key={s.value} value={s.value}>{s.label}</option>)}</select></td>{usedProducts.map(p=><td key={p.id} className="inv-cell">{o.products[p.id]?fmt(o.products[p.id]):'—'}</td>)}</tr>)}
-        <tr style={{fontWeight:700,background:'#f0f9ff'}}><td colSpan="2">Customer Total</td>{usedProducts.map(p=><td key={p.id} className="inv-cell" style={{fontWeight:700}}>{tp[p.id]?fmt(tp[p.id]):'—'}</td>)}</tr>
-      </tbody>
+      <tbody>{orders.map(o=><tr key={o.id}><td>{fmtDate(o.date)}</td><td><select value={o.status} onChange={e=>updateOrder(o.id,{status:e.target.value})} style={{width:'auto',padding:'3px 6px',fontSize:11}}>{STATUS_OPTIONS.map(s=><option key={s.value} value={s.value}>{s.label}</option>)}</select></td>{usedProducts.map(p=><td key={p.id} className="inv-cell">{num(o.products?.[p.id])?fmt(num(o.products[p.id])):'—'}</td>)}</tr>)}</tbody>
+      <tfoot><tr><td>Customer Total</td><td></td>{usedProducts.map(p=><td key={p.id} className="inv-cell">{tp[p.id]?fmt(tp[p.id]):'—'}</td>)}</tr></tfoot>
     </table></div></div>
-    {deliveries.length>0&&<div className="card"><div className="card-header"><h3>Delivery History</h3></div><table><thead><tr><th>Date</th><th>Products</th><th>Pumps Out</th><th>Totes</th><th>Attachments</th></tr></thead><tbody>
-      {deliveries.map(d=><tr key={d.id}><td>{fmtDate(d.date)}</td><td>{Object.entries(d.products||{}).filter(([,v])=>v>0).map(([pid,qty])=>{const p=allProducts.find(x=>x.id===pid);return <span key={pid} className="tag" style={{marginRight:4}}>{productDisplayName(p||{name:pid})}: {fmt(qty)}</span>;})}</td><td>{d.pumpsOut||'—'}{d.pumpsReturnDate?` (return: ${fmtDate(d.pumpsReturnDate)})`:''}</td><td>{d.totes||'—'}{d.totesReturned?' (returned)':d.totes?' (out)':''}</td><td>{(d.attachments||[]).length>0?<span className="tag">{d.attachments.length} file{d.attachments.length>1?'s':''}</span>:'—'}</td></tr>)}
-    </tbody></table></div>}
+
+    {deliveries.length>0&&<div className="card" style={{padding:0}}><div className="card-header" style={{padding:'14px 16px'}}><h3>Delivery History</h3></div><div className="inv-table-wrap"><table className="freeze-table"><thead><tr><th>Date</th><th>Products</th><th>Pumps</th><th>Totes</th><th>Notes</th><th>Files</th></tr></thead><tbody>
+      {deliveries.map(d=><tr key={d.id}><td>{fmtDate(d.date)}</td>
+        <td>{Object.entries(d.products||{}).filter(([,v])=>num(v)>0).map(([pid,qty])=>{const p=allProducts.find(x=>x.id===pid);return <span key={pid} className="tag" style={{marginRight:4}}>{productDisplayName(p||{name:pid})}: {fmt(num(qty))}</span>;})}</td>
+        <td>{num(d.pumpsOut)?`${fmt(num(d.pumpsReturnedQty))}/${fmt(num(d.pumpsOut))} back`:'—'}{d.pumpsReturnDate?` (due ${fmtDate(d.pumpsReturnDate)})`:''}</td>
+        <td>{num(d.totes)?`${fmt(num(d.totesReturnedQty))}/${fmt(num(d.totes))} back`:'—'}</td>
+        <td style={{fontSize:12,maxWidth:200,whiteSpace:'normal'}}>{d.notes||'—'}</td>
+        <td>{(d.attachments||[]).length>0?<span className="tag">{d.attachments.length}</span>:'—'}</td></tr>)}
+    </tbody></table></div></div>}
+
+    {returns.length>0&&<div className="card" style={{padding:0}}><div className="card-header" style={{padding:'14px 16px'}}><h3>Returns</h3></div><div className="inv-table-wrap"><table className="freeze-table"><thead><tr><th>Date</th><th>Products</th><th>Reason</th><th>Notes</th></tr></thead><tbody>
+      {returns.map(r=><tr key={r.id}><td>{fmtDate(r.date)}</td>
+        <td>{Object.entries(r.products||{}).filter(([,v])=>num(v)>0).map(([pid,qty])=>{const p=allProducts.find(x=>x.id===pid);return <span key={pid} className="tag" style={{marginRight:4}}>{productDisplayName(p||{name:pid})}: {fmt(num(qty))}</span>;})}</td>
+        <td><span className="tag">{RETURN_REASONS.find(x=>x.value===r.reason)?.label||r.reason}</span></td>
+        <td style={{fontSize:12}}>{r.notes||'—'}</td></tr>)}
+    </tbody></table></div></div>}
+
+    {editPhone&&<PhoneModal customerName={customerName} onClose={()=>setEditPhone(false)}/>}
   </div>;
 }
 
 // ══════════════════════════
 // ── DELIVERIES SCREEN ──
 // ══════════════════════════
-function DeliveriesScreen({onNavigate}) {
-  const {data,allProducts,updateDelivery,showToast} = useApp();
+function DeliveriesScreen({onNavigate,navArg}) {
+  const {data,allProducts,updateDelivery,returnEquipment,deleteDelivery,deleteReturn,pumpSummary,equipmentByCustomer,showToast} = useApp();
   const [showNew,setShowNew] = useState(false);
   const [showTicket,setShowTicket] = useState(null);
+  const [showReturn,setShowReturn] = useState(false);   // item 14
+  const [returnQty,setReturnQty] = useState(null);      // partial equipment return
   const [tab,setTab] = useState('deliveries');
   const {sortKey:dSK,sortDir:dSD,toggleSort:dToggle,sortFn:dSort} = useSort(null);
-  const activePumps=data.deliveries.filter(d=>d.pumpsOut>0&&!d.pumpsReturned);
-  const activeTotes=data.deliveries.filter(d=>d.totes>0&&!d.totesReturned);
+  // Outstanding is now quantity-based, not a boolean flag: a delivery with 5 pumps
+  // out and 3 returned stays in this list showing 2 still held.
+  const activePumps=data.deliveries.filter(d=>num(d.pumpsOut)>num(d.pumpsReturnedQty));
+  const activeTotes=data.deliveries.filter(d=>num(d.totes)>num(d.totesReturnedQty));
+  const returns=data.returns||[];
 
   const sortedDeliveries=useMemo(()=>{
     if(!dSK) return [...data.deliveries].sort((a,b)=>new Date(b.date)-new Date(a.date));
@@ -1209,16 +1874,22 @@ function DeliveriesScreen({onNavigate}) {
 
   return <div className="fade-in">
     <div className="page-header" style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
-      <div><h2>Deliveries</h2><p>Manage deliveries, pumps, and totes</p></div>
-      <button className="btn btn-primary" onClick={()=>setShowNew(true)}><Icon name="truck" size={16}/>New Delivery</button>
+      <div><h2>Deliveries</h2><p>Manage deliveries, returns, pumps, and totes</p></div>
+      <div style={{display:'flex',gap:8}}>
+        {/* Item 14 */}
+        <button className="btn btn-secondary" onClick={()=>setShowReturn(true)}><Icon name="undo" size={16}/>New Return</button>
+        <button className="btn btn-primary" onClick={()=>setShowNew(true)}><Icon name="truck" size={16}/>New Delivery</button>
+      </div>
     </div>
     <div className="tabs">
       <div className={`tab ${tab==='deliveries'?'active':''}`} onClick={()=>setTab('deliveries')}>Deliveries ({data.deliveries.length})</div>
-      <div className={`tab ${tab==='pumps'?'active':''}`} onClick={()=>setTab('pumps')}>Pumps Out ({activePumps.length})</div>
-      <div className={`tab ${tab==='totes'?'active':''}`} onClick={()=>setTab('totes')}>Totes Out ({activeTotes.length})</div>
+      <div className={`tab ${tab==='returns'?'active':''}`} onClick={()=>setTab('returns')}>Returns ({returns.length})</div>
+      <div className={`tab ${tab==='pumps'?'active':''}`} onClick={()=>setTab('pumps')}>Pumps Out ({fmt(pumpSummary.held)})</div>
+      <div className={`tab ${tab==='totes'?'active':''}`} onClick={()=>setTab('totes')}>Totes Out ({fmt(pumpSummary.totesHeld)})</div>
+      <div className={`tab ${tab==='equipment'?'active':''}`} onClick={()=>setTab('equipment')}>By Customer ({equipmentByCustomer.length})</div>
       <div className={`tab ${tab==='tickets'?'active':''}`} onClick={()=>setTab('tickets')}>Saved Tickets ({data.deliveryTickets?.length||0})</div>
     </div>
-    {tab==='deliveries'&&<div className="card" style={{padding:0}}><table><thead><tr><SortTh label="Customer" colKey="customer" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Date" colKey="date" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Products" colKey="products" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Pumps" colKey="pumps" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Totes" colKey="totes" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Photos" colKey="photos" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><th></th></tr></thead><tbody>
+    {tab==='deliveries'&&<div className="card" style={{padding:0}}><div className="inv-table-wrap"><table className="freeze-table"><thead><tr><SortTh label="Customer" colKey="customer" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Date" colKey="date" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Products" colKey="products" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Pumps" colKey="pumps" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Totes" colKey="totes" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Photos" colKey="photos" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><th></th></tr></thead><tbody>
       {sortedDeliveries.length===0?<tr><td colSpan="7" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No deliveries recorded yet</td></tr>:sortedDeliveries.map(d=>{
         const delCount=data.deliveries.filter(x=>x.orderId===d.orderId).length;
         const delIdx=data.deliveries.filter(x=>x.orderId===d.orderId).findIndex(x=>x.id===d.id)+1;
@@ -1229,36 +1900,286 @@ function DeliveriesScreen({onNavigate}) {
         <td>{(d.attachments||[]).length>0?<span className="tag">{d.attachments.length}</span>:'—'}</td>
         <td><button className="btn btn-sm btn-secondary" onClick={()=>setShowTicket(d)}><Icon name="printer" size={14}/>Ticket</button></td>
       </tr>;})}
-    </tbody></table></div>}
-    {tab==='pumps'&&<div className="card" style={{padding:0}}><table><thead><tr><SortTh label="Customer" colKey="customer" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Delivery Date" colKey="date" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Pumps Out" colKey="pumps" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Return Date" colKey="returnDate" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><th></th></tr></thead><tbody>
-      {sortedPumps.length===0?<tr><td colSpan="5" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No pumps currently out</td></tr>:sortedPumps.map(d=><tr key={d.id}><td style={{fontWeight:500}}>{d.customer}</td><td>{fmtDate(d.date)}</td><td style={{fontWeight:600}}>{d.pumpsOut}</td><td>{d.pumpsReturnDate?fmtDate(d.pumpsReturnDate):'Not set'}</td>
-        <td><button className="btn btn-sm btn-success" onClick={()=>{updateDelivery(d.id,{pumpsReturned:true,pumpsReturnedDate:today()});showToast('Pumps returned');}}><Icon name="check" size={14}/>Return</button></td></tr>)}
-    </tbody></table></div>}
-    {tab==='totes'&&<div className="card" style={{padding:0}}><table><thead><tr><SortTh label="Customer" colKey="customer" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Delivery Date" colKey="date" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Totes" colKey="totes" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><th>Status</th><th></th></tr></thead><tbody>
-      {sortedTotes.length===0?<tr><td colSpan="5" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No totes currently out</td></tr>:sortedTotes.map(d=><tr key={d.id}><td style={{fontWeight:500}}>{d.customer}</td><td>{fmtDate(d.date)}</td><td style={{fontWeight:600}}>{d.totes}</td><td><span className="status-badge status-partial-deliver"><span className="status-dot dot-partial-deliver"></span>Out</span></td>
-        <td><button className="btn btn-sm btn-success" onClick={()=>{updateDelivery(d.id,{totesReturned:true,totesReturnedDate:today()});showToast('Totes checked in');}}><Icon name="check" size={14}/>Check In</button></td></tr>)}
-    </tbody></table></div>}
-    {tab==='tickets'&&<div className="card" style={{padding:0}}><table><thead><tr><SortTh label="Customer" colKey="customer" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Delivery Date" colKey="date" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Saved On" colKey="savedAt" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Products" colKey="products" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><th></th></tr></thead><tbody>
+    </tbody></table></div></div>}
+    {/* ── ITEM 14: RETURNS ── */}
+    {tab==='returns'&&<div className="card" style={{padding:0}}><div className="inv-table-wrap"><table className="freeze-table"><thead><tr>
+      <th>Customer</th><th>Date</th><th>Products</th><th>Reason</th><th>Notes</th><th>Received By</th><th></th></tr></thead><tbody>
+      {returns.length===0?<tr><td colSpan="7" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No returns recorded. Use <strong>New Return</strong> when product comes back — it credits available inventory.</td></tr>
+      :[...returns].sort((a,b)=>(b.date||'').localeCompare(a.date||'')).map(r=><tr key={r.id}>
+        <td style={{fontWeight:500}}>{r.customer}</td><td>{fmtDate(r.date)}</td>
+        <td>{Object.entries(r.products||{}).filter(([,v])=>num(v)>0).map(([pid,qty])=>{const p=allProducts.find(x=>x.id===pid);
+          return <span key={pid} className="tag" style={{marginRight:4}}>{productDisplayName(p||{name:pid})}: {fmt(num(qty))}</span>;})}</td>
+        <td><span className="tag" style={{background:r.reason==='weigh-back'?'var(--orange-bg)':'#f1f5f9',color:r.reason==='weigh-back'?'var(--orange)':'var(--text-secondary)'}}>
+          {RETURN_REASONS.find(x=>x.value===r.reason)?.label||r.reason}</span></td>
+        <td style={{fontSize:12,maxWidth:220,whiteSpace:'normal'}}>{r.notes||'—'}</td>
+        <td>{r.receivedBy||'—'}</td>
+        <td style={{textAlign:'right'}}><button className="btn-icon" onClick={()=>{if(confirm('Delete this return? Inventory will be adjusted back.'))deleteReturn(r.id);}}><Icon name="trash" size={14}/></button></td>
+      </tr>)}
+    </tbody></table></div></div>}
+
+    {tab==='pumps'&&<div className="card" style={{padding:0}}>
+      <div style={{padding:'12px 16px',borderBottom:'1px solid var(--border)',display:'flex',gap:20,flexWrap:'wrap',fontSize:13}}>
+        <span>Total out: <strong>{fmt(pumpSummary.out)}</strong></span>
+        <span style={{color:'var(--success)'}}>Returned: <strong>{fmt(pumpSummary.back)}</strong></span>
+        <span style={{color:'var(--orange)'}}>Still held: <strong>{fmt(pumpSummary.held)}</strong></span>
+        {pumpSummary.overdue>0&&<span style={{color:'var(--danger)'}}>Overdue: <strong>{pumpSummary.overdue}</strong></span>}
+      </div>
+      <div className="inv-table-wrap"><table className="freeze-table"><thead><tr>
+        <SortTh label="Customer" colKey="customer" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Delivery Date" colKey="date" sortKey={dSK} sortDir={dSD} onSort={dToggle}/>
+        <SortTh label="Out" colKey="pumps" sortKey={dSK} sortDir={dSD} onSort={dToggle} style={{textAlign:'right'}}/>
+        <th style={{textAlign:'right'}}>Returned</th><th style={{textAlign:'right'}}>Still Out</th>
+        <SortTh label="Due Back" colKey="returnDate" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><th></th></tr></thead><tbody>
+      {sortedPumps.length===0?<tr><td colSpan="7" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No pumps currently out</td></tr>
+      :sortedPumps.map(d=>{const out=num(d.pumpsOut),back=num(d.pumpsReturnedQty),held=out-back;
+        const overdue=d.pumpsReturnDate&&d.pumpsReturnDate<today();
+        return <tr key={d.id}>
+        <td style={{fontWeight:500}}>{d.customer}</td><td>{fmtDate(d.date)}</td>
+        <td className="inv-cell" style={{fontWeight:600}}>{fmt(out)}</td>
+        <td className="inv-cell" style={{color:'var(--success)'}}>{fmt(back)}</td>
+        <td className="inv-cell" style={{fontWeight:700,color:'var(--orange)'}}>{fmt(held)}</td>
+        <td style={{color:overdue?'var(--danger)':undefined,fontWeight:overdue?600:400}}>{d.pumpsReturnDate?fmtDate(d.pumpsReturnDate):'Not set'}{overdue?' (overdue)':''}</td>
+        <td style={{textAlign:'right',whiteSpace:'nowrap'}}>
+          {/* Partial returns: the old boolean flag could not express 5 out / 3 back */}
+          <button className="btn btn-sm btn-secondary" style={{marginRight:4}} onClick={()=>setReturnQty({id:d.id,kind:'pumps',max:held,customer:d.customer})}>Partial</button>
+          <button className="btn btn-sm btn-success" onClick={()=>{returnEquipment(d.id,'pumps',held);showToast(`${fmt(held)} pump${held!==1?'s':''} returned`);}}><Icon name="check" size={14}/>All Back</button>
+        </td></tr>;})}
+    </tbody></table></div></div>}
+
+    {tab==='totes'&&<div className="card" style={{padding:0}}>
+      <div style={{padding:'12px 16px',borderBottom:'1px solid var(--border)',display:'flex',gap:20,flexWrap:'wrap',fontSize:13}}>
+        <span>Total out: <strong>{fmt(pumpSummary.totesOut)}</strong></span>
+        <span style={{color:'var(--success)'}}>Returned: <strong>{fmt(pumpSummary.totesBack)}</strong></span>
+        <span style={{color:'var(--purple)'}}>Still held: <strong>{fmt(pumpSummary.totesHeld)}</strong></span>
+      </div>
+      <div className="inv-table-wrap"><table className="freeze-table"><thead><tr>
+        <SortTh label="Customer" colKey="customer" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Delivery Date" colKey="date" sortKey={dSK} sortDir={dSD} onSort={dToggle}/>
+        <SortTh label="Out" colKey="totes" sortKey={dSK} sortDir={dSD} onSort={dToggle} style={{textAlign:'right'}}/>
+        <th style={{textAlign:'right'}}>Returned</th><th style={{textAlign:'right'}}>Still Out</th><th></th></tr></thead><tbody>
+      {sortedTotes.length===0?<tr><td colSpan="6" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No totes currently out</td></tr>
+      :sortedTotes.map(d=>{const out=num(d.totes),back=num(d.totesReturnedQty),held=out-back;
+        return <tr key={d.id}>
+        <td style={{fontWeight:500}}>{d.customer}</td><td>{fmtDate(d.date)}</td>
+        <td className="inv-cell" style={{fontWeight:600}}>{fmt(out)}</td>
+        <td className="inv-cell" style={{color:'var(--success)'}}>{fmt(back)}</td>
+        <td className="inv-cell" style={{fontWeight:700,color:'var(--purple)'}}>{fmt(held)}</td>
+        <td style={{textAlign:'right',whiteSpace:'nowrap'}}>
+          <button className="btn btn-sm btn-secondary" style={{marginRight:4}} onClick={()=>setReturnQty({id:d.id,kind:'totes',max:held,customer:d.customer})}>Partial</button>
+          <button className="btn btn-sm btn-success" onClick={()=>{returnEquipment(d.id,'totes',held);showToast(`${fmt(held)} tote${held!==1?'s':''} checked in`);}}><Icon name="check" size={14}/>All Back</button>
+        </td></tr>;})}
+    </tbody></table></div></div>}
+
+    {/* ── ITEM 13: equipment rolled up per customer ── */}
+    {tab==='equipment'&&<div className="card" style={{padding:0}}><div className="inv-table-wrap"><table className="freeze-table"><thead><tr>
+      <th>Customer</th><th style={{textAlign:'right'}}>Pumps Out</th><th style={{textAlign:'right'}}>Pumps Returned</th><th style={{textAlign:'right'}}>Pumps Held</th>
+      <th style={{textAlign:'right'}}>Totes Out</th><th style={{textAlign:'right'}}>Totes Held</th><th>Last Out</th></tr></thead><tbody>
+      {equipmentByCustomer.length===0?<tr><td colSpan="7" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No equipment has gone out yet</td></tr>
+      :[...equipmentByCustomer].sort((a,b)=>b.pumpsHeld-a.pumpsHeld||a.customer.localeCompare(b.customer)).map(r=><tr key={r.customer}>
+        <td style={{fontWeight:500,cursor:'pointer'}} onClick={()=>onNavigate&&onNavigate('customer-detail',r.customer)}>{r.customer}</td>
+        <td className="inv-cell">{fmt(r.pumpsOut)}</td>
+        <td className="inv-cell" style={{color:'var(--success)'}}>{fmt(r.pumpsReturned)}</td>
+        <td className="inv-cell" style={{fontWeight:700,color:r.pumpsHeld>0?'var(--orange)':'var(--success)'}}>{fmt(r.pumpsHeld)}</td>
+        <td className="inv-cell">{fmt(r.totesOut)}</td>
+        <td className="inv-cell" style={{fontWeight:600,color:r.totesHeld>0?'var(--purple)':'inherit'}}>{fmt(r.totesHeld)}</td>
+        <td>{r.lastOut?fmtDate(r.lastOut):'—'}</td>
+      </tr>)}
+    </tbody>
+    <tfoot><tr>
+      <td>TOTALS</td>
+      <td className="inv-cell">{fmt(pumpSummary.out)}</td>
+      <td className="inv-cell">{fmt(pumpSummary.back)}</td>
+      <td className="inv-cell">{fmt(pumpSummary.held)}</td>
+      <td className="inv-cell">{fmt(pumpSummary.totesOut)}</td>
+      <td className="inv-cell">{fmt(pumpSummary.totesHeld)}</td>
+      <td></td>
+    </tr></tfoot></table></div></div>}
+    {tab==='tickets'&&<div className="card" style={{padding:0}}><div className="inv-table-wrap"><table className="freeze-table"><thead><tr><SortTh label="Customer" colKey="customer" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Delivery Date" colKey="date" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Saved On" colKey="savedAt" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><SortTh label="Products" colKey="products" sortKey={dSK} sortDir={dSD} onSort={dToggle}/><th></th></tr></thead><tbody>
       {sortedTickets.length===0?<tr><td colSpan="5" style={{textAlign:'center',padding:40,color:'var(--text-secondary)'}}>No saved tickets yet. Tickets are saved when you generate a delivery.</td></tr>:sortedTickets.map(t=><tr key={t.id}><td style={{fontWeight:500}}>{t.customer}</td><td>{fmtDate(t.date)}</td><td>{fmtDate(t.savedAt)}</td><td>{t.productCount} products</td>
         <td><button className="btn btn-sm btn-secondary" onClick={()=>setShowTicket(t)}><Icon name="printer" size={14}/>View</button></td></tr>)}
-    </tbody></table></div>}
+    </tbody></table></div></div>}
     {showNew&&<NewDeliveryModal onClose={()=>setShowNew(false)}/>}
     {showTicket&&<DeliveryTicketModal delivery={showTicket} onClose={()=>setShowTicket(null)}/>}
+    {showReturn&&<ReturnModal onClose={()=>setShowReturn(false)}/>}
+    {returnQty&&<PartialReturnModal info={returnQty} onClose={()=>setReturnQty(null)}/>}
   </div>;
+}
+
+// ── PARTIAL EQUIPMENT RETURN ──
+// The old model stored pumpsReturned as a boolean, so "5 went out, 3 came back"
+// was unrepresentable and the operator had to either lie (mark all returned) or
+// leave the row open indefinitely. Quantities fix that.
+function PartialReturnModal({info,onClose}) {
+  const {returnEquipment,showToast} = useApp();
+  const [qty,setQty] = useState('');
+  const n=num(qty);
+  const valid=n>0&&n<=info.max;
+  const save=()=>{
+    if(!valid) return;
+    returnEquipment(info.id,info.kind,n);
+    showToast(`${fmt(n)} ${info.kind==='pumps'?'pump':'tote'}${n!==1?'s':''} returned`);
+    onClose();
+  };
+  return <Modal title={`Return ${info.kind==='pumps'?'Pumps':'Totes'} — ${info.customer}`} onClose={onClose}>
+    <div className="modal-body">
+      <p style={{fontSize:13,color:'var(--text-secondary)',marginBottom:12}}>
+        <strong>{fmt(info.max)}</strong> currently out. Enter how many are coming back now.</p>
+      <div className="form-group"><label>Quantity Returned</label>
+        <input type="number" step="1" min="0" max={info.max} value={qty} autoFocus
+          onChange={e=>setQty(e.target.value)} placeholder={`0 – ${fmt(info.max)}`}
+          onKeyDown={e=>{if(e.key==='Enter'&&valid)save();}}/>
+        {n>info.max&&<p style={{fontSize:12,color:'var(--danger)',marginTop:4}}>Cannot return more than the {fmt(info.max)} still out.</p>}
+      </div>
+    </div>
+    <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+      <button className="btn btn-success" disabled={!valid} onClick={save}><Icon name="check" size={14}/>Record Return</button></div>
+  </Modal>;
+}
+
+// ══════════════════════════
+// ── ITEM 14: RETURN TICKET ──
+// Product physically coming back. Credits available inventory via getProductReturned,
+// and prints as a ticket for the customer's records.
+// ══════════════════════════
+function ReturnModal({onClose,presetCustomer}) {
+  const {data,allProducts,productsAZ,allCustomers,addReturn,showToast} = useApp();
+  const [customer,setCustomer] = useState(presetCustomer||'');
+  const [date,setDate] = useState(today());
+  const [reason,setReason] = useState('weigh-back');
+  const [notes,setNotes] = useState('');
+  const [receivedBy,setReceivedBy] = useState((data.settings?.users||[])[0]||'');
+  const [products,setProducts] = useState({});
+  const [search,setSearch] = useState('');
+
+  const custOrders = useMemo(()=>customer?data.orders.filter(o=>o.customer===customer):[],[customer,data.orders]);
+  // Products this customer actually received are the likely returns — surface them first.
+  const delivered = useMemo(()=>{
+    const acc={};
+    data.deliveries.filter(d=>d.customer===customer).forEach(d=>{
+      Object.entries(d.products||{}).forEach(([pid,q])=>{acc[pid]=(acc[pid]||0)+num(q);});
+    });
+    return acc;
+  },[data.deliveries,customer]);
+  const suggested = useMemo(()=>productsAZ.filter(p=>num(delivered[p.id])>0),[productsAZ,delivered]);
+  const others = useMemo(()=>{
+    const q=search.trim().toLowerCase();
+    const pool=productsAZ.filter(p=>!(num(delivered[p.id])>0));
+    return q?pool.filter(p=>productDisplayName(p).toLowerCase().includes(q)):pool.slice(0,40);
+  },[productsAZ,delivered,search]);
+
+  const setQty=(pid,val)=>{const v=num(val);setProducts(p=>v>0?{...p,[pid]:v}:Object.fromEntries(Object.entries(p).filter(([k])=>k!==pid)));};
+  const total=Object.values(products).reduce((s,v)=>s+num(v),0);
+
+  const save=()=>{
+    if(!customer){alert('Select a customer');return;}
+    const clean={};Object.entries(products).forEach(([pid,q])=>{if(num(q)>0)clean[pid]=num(q);});
+    if(Object.keys(clean).length===0){alert('Enter at least one product quantity');return;}
+    addReturn({customer,date,reason,notes,receivedBy,products:clean});
+    onClose();
+  };
+
+  return <Modal title="New Return Ticket" onClose={onClose} wide>
+    <div className="modal-body">
+      <div style={{padding:'10px 14px',background:'var(--primary-bg)',borderRadius:6,fontSize:12,color:'var(--primary)',marginBottom:14}}>
+        Returned product is credited back to <strong>available inventory</strong> for the return date's fiscal year.
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+        <div className="form-group"><label>Customer</label>
+          <select value={customer} onChange={e=>{setCustomer(e.target.value);setProducts({});}}>
+            <option value="">-- Select customer --</option>
+            {[...allCustomers].sort().map(c=><option key={c} value={c}>{c}</option>)}
+          </select></div>
+        <div className="form-group"><label>Return Date</label><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></div>
+        <div className="form-group"><label>Reason</label>
+          <select value={reason} onChange={e=>setReason(e.target.value)}>
+            {RETURN_REASONS.map(r=><option key={r.value} value={r.value}>{r.label}</option>)}
+          </select></div>
+        <div className="form-group"><label>Received By</label>
+          <select value={receivedBy} onChange={e=>setReceivedBy(e.target.value)}>
+            <option value="">-- Select user --</option>
+            {(data.settings?.users||[]).map(u=><option key={u} value={u}>{u}</option>)}
+          </select></div>
+      </div>
+
+      {customer&&<>
+        {suggested.length>0&&<div style={{marginTop:8}}>
+          <h4 style={{fontSize:13,fontWeight:600,marginBottom:8}}>Previously delivered to {customer}</h4>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(250px,1fr))',gap:8}}>
+            {suggested.map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:8}}>
+              <span style={{fontSize:12,flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                {productDisplayName(p)}
+                <span style={{color:'var(--text-secondary)',marginLeft:4}}>({fmt(num(delivered[p.id]))} out)</span>
+              </span>
+              <input type="number" step="0.1" min="0" max={num(delivered[p.id])} style={{width:80}} placeholder="0"
+                value={products[p.id]||''} onChange={e=>setQty(p.id,e.target.value)}/>
+            </div>)}
+          </div>
+        </div>}
+
+        <div style={{marginTop:14}}>
+          <h4 style={{fontSize:13,fontWeight:600,marginBottom:8}}>Other products</h4>
+          <div className="search-box" style={{marginBottom:8}}><Icon name="search"/>
+            <input placeholder="Search all products..." value={search} onChange={e=>setSearch(e.target.value)}/></div>
+          <div style={{maxHeight:200,overflowY:'auto',border:'1px solid var(--border)',borderRadius:6,padding:8}}>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(250px,1fr))',gap:8}}>
+              {others.map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:8}}>
+                <span style={{fontSize:12,flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:'var(--text-secondary)'}}>{productDisplayName(p)}</span>
+                <input type="number" step="0.1" min="0" style={{width:80}} placeholder="0" value={products[p.id]||''} onChange={e=>setQty(p.id,e.target.value)}/>
+              </div>)}
+            </div>
+          </div>
+        </div>
+
+        <div className="form-group" style={{marginTop:14}}><label>Notes</label>
+          <textarea rows="2" value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Condition, who picked it up, weigh ticket number..."/></div>
+
+        {total>0&&<div style={{padding:'10px 14px',background:'var(--success-bg)',borderRadius:6,fontSize:13,color:'var(--success)',fontWeight:600}}>
+          Returning {Object.keys(products).length} product{Object.keys(products).length!==1?'s':''} — {fmt(total)} total units back to inventory
+        </div>}
+      </>}
+    </div>
+    <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+      <button className="btn btn-primary" disabled={!customer||total<=0} onClick={save}><Icon name="undo" size={14}/>Create Return Ticket</button></div>
+  </Modal>;
 }
 
 // ══════════════════════════════════════
 // ── NEW DELIVERY WITH PHOTO CAPTURE ──
 // ══════════════════════════════════════
-function NewDeliveryModal({onClose}) {
-  const {data,allProducts,addDelivery,updateOrder,showToast,saveDeliveryTicket,getOrderDelivered,getOrderDeliveryCount,isOrderFullyDelivered} = useApp();
-  const [mode,setMode] = useState('individual');
-  const [selectedOrder,setSelectedOrder] = useState('');
+// ══════════════════════════════════════════════════════════
+// ── NEW DELIVERY ──
+// Rewritten to fix two data-integrity defects and add items 2,3,3.1,7,8,9.
+//
+// DEFECT (silent data corruption): the old group branch of save() recomputed each
+// order's remaining quantity and wrote THAT, completely ignoring the `products`
+// state the user had just typed into the "Deliver Now" inputs. Every group delivery
+// was recorded as a full delivery regardless of what was entered, and the order was
+// then flipped to 'paid'. Partial group deliveries were impossible and the operator
+// had no indication their input was discarded. Individual and group now share ONE
+// allocation path that always honours entered quantities.
+//
+// DEFECT (inverted filter): deliverableOrders was
+//   o.status!=='paid' || !isOrderFullyDelivered(o.id)
+// Because || short-circuits, ANY order not manually marked 'paid' appeared in the
+// picker even when fully delivered. Now keyed purely on actual delivered quantities.
+// ══════════════════════════════════════════════════════════
+function NewDeliveryModal({onClose,presetOrderId,presetCustomer}) {
+  const {data,allProducts,productsAZ,addDelivery,updateOrder,showToast,saveDeliveryTicket,getOrderDelivered,getOrderDeliveryCount,isOrderFullyDelivered} = useApp();
+  // mode: 'individual' | 'customer' (item 3) | 'group'
+  const [mode,setMode] = useState(presetOrderId?'individual':'individual');
+  const [selectedOrder,setSelectedOrder] = useState(presetOrderId||'');
+  const [selectedCustomer,setSelectedCustomer] = useState(presetCustomer||'');
+  const [selectedCustomerOrders,setSelectedCustomerOrders] = useState([]);
   const [selectedGroup,setSelectedGroup] = useState('');
   const [selectedGroupOrders,setSelectedGroupOrders] = useState([]);
   const [date,setDate] = useState(today());
   const [products,setProducts] = useState({});
   const [includedProducts,setIncludedProducts] = useState({});
+  const [extraProducts,setExtraProducts] = useState({});   // item 8: added after the order
+  const [showAddProduct,setShowAddProduct] = useState(false);
+  const [extraSearch,setExtraSearch] = useState('');
+  const [notes,setNotes] = useState('');                    // item 7
+  const [deliveredBy,setDeliveredBy] = useState((data.settings?.users||[])[0]||'');  // item 9
+  const [driverSig,setDriverSig] = useState('');
+  const [customerSig,setCustomerSig] = useState('');
   const [pumpsOut,setPumpsOut] = useState('');
   const [pumpsReturnDate,setPumpsReturnDate] = useState('');
   const [totes,setTotes] = useState('');
@@ -1271,73 +2192,188 @@ function NewDeliveryModal({onClose}) {
   const [cameraMode,setCameraMode] = useState('photo');
   const fileInputRef = useRef(null);
 
-  // Show orders that are not fully delivered
-  const deliverableOrders=data.orders.filter(o=>o.status!=='paid'||!isOrderFullyDelivered(o.id));
-  const selectedOrderObj=data.orders.find(o=>o.id===selectedOrder);
-  const groupsWithPendingOrders=useMemo(()=>data.customerGroups.filter(g=>deliverableOrders.some(o=>g.members.includes(o.customer))),[data.customerGroups,deliverableOrders]);
-  const selectedGroupObj=data.customerGroups.find(g=>g.name===selectedGroup);
-  const groupPendingOrders=useMemo(()=>selectedGroupObj?deliverableOrders.filter(o=>selectedGroupObj.members.includes(o.customer)):[], [selectedGroupObj,deliverableOrders]);
+  // BUGFIX: purely quantity-driven. Status is a display concern and must not gate this.
+  const deliverableOrders = useMemo(()=>data.orders.filter(o=>!isOrderFullyDelivered(o.id)),[data.orders,isOrderFullyDelivered]);
+  const selectedOrderObj = data.orders.find(o=>o.id===selectedOrder);
 
-  // Calculate remaining quantities for the selected order
-  const orderRemaining=useMemo(()=>{
-    if(!selectedOrderObj) return {};
-    const delivered=getOrderDelivered(selectedOrderObj.id);
-    const remaining={};
-    Object.entries(selectedOrderObj.products).forEach(([pid,qty])=>{
-      remaining[pid]=Math.max(0,qty-(delivered[pid]||0));
+  // ── ITEM 3: multiple orders from the SAME CUSTOMER (no group required) ──
+  const customersWithOrders = useMemo(()=>{
+    const counts={};
+    deliverableOrders.forEach(o=>{counts[o.customer]=(counts[o.customer]||0)+1;});
+    return Object.keys(counts).sort((a,b)=>a.localeCompare(b)).map(c=>({name:c,count:counts[c]}));
+  },[deliverableOrders]);
+  const customerPendingOrders = useMemo(()=>selectedCustomer?deliverableOrders.filter(o=>o.customer===selectedCustomer):[],[selectedCustomer,deliverableOrders]);
+
+  const groupsWithPendingOrders = useMemo(()=>data.customerGroups.filter(g=>deliverableOrders.some(o=>g.members.includes(o.customer))),[data.customerGroups,deliverableOrders]);
+  const selectedGroupObj = data.customerGroups.find(g=>g.name===selectedGroup);
+  const groupPendingOrders = useMemo(()=>selectedGroupObj?deliverableOrders.filter(o=>selectedGroupObj.members.includes(o.customer)):[],[selectedGroupObj,deliverableOrders]);
+
+  // The set of orders this delivery covers, in every mode. Single source of truth.
+  const activeOrders = useMemo(()=>{
+    if(mode==='individual') return selectedOrderObj?[selectedOrderObj]:[];
+    if(mode==='customer')  return customerPendingOrders.filter(o=>selectedCustomerOrders.includes(o.id));
+    return groupPendingOrders.filter(o=>selectedGroupOrders.includes(o.id));
+  },[mode,selectedOrderObj,customerPendingOrders,selectedCustomerOrders,groupPendingOrders,selectedGroupOrders]);
+
+  // Combined ordered / already-delivered / remaining across activeOrders.
+  const lines = useMemo(()=>{
+    const acc={};
+    activeOrders.forEach(o=>{
+      const del=getOrderDelivered(o.id);
+      Object.entries(o.products||{}).forEach(([pid,qty])=>{
+        const q=num(qty); if(q<=0) return;
+        if(!acc[pid]) acc[pid]={pid,ordered:0,delivered:0};
+        acc[pid].ordered+=q;
+        acc[pid].delivered+=num(del[pid]);
+      });
     });
-    return remaining;
-  },[selectedOrderObj,getOrderDelivered]);
+    return Object.values(acc).map(l=>({...l,remaining:l.ordered-l.delivered}))
+      .sort((a,b)=>{
+        const pa=allProducts.find(x=>x.id===a.pid),pb=allProducts.find(x=>x.id===b.pid);
+        return productDisplayName(pa||{name:a.pid}).localeCompare(productDisplayName(pb||{name:b.pid}));
+      });
+  },[activeOrders,getOrderDelivered,allProducts]);
 
-  const deliveryNum=selectedOrderObj?getOrderDeliveryCount(selectedOrderObj.id)+1:1;
-
-  // When order is selected, default deliver quantities to remaining amounts
+  // Seed the Deliver Now inputs whenever the order selection changes.
+  // Deps now include the derived objects — the old effects listed only
+  // [selectedOrder,mode] while reading getOrderDelivered/groupPendingOrders through
+  // a stale closure, which intermittently rendered an empty product list.
+  const seedKey = activeOrders.map(o=>o.id).sort().join('|');
   useEffect(()=>{
-    if(mode==='individual'&&selectedOrderObj){
-      const delivered=getOrderDelivered(selectedOrderObj.id);
-      const remaining={};const included={};
-      Object.entries(selectedOrderObj.products).forEach(([pid,qty])=>{
-        const rem=Math.max(0,qty-(delivered[pid]||0));
-        remaining[pid]=rem;
-        included[pid]=rem>0;
-      });
-      setProducts(remaining);
-      setIncludedProducts(included);
-    }
-  },[selectedOrder,mode]);
-  useEffect(()=>{
-    if(mode==='group'&&selectedGroupObj){
-      const ids=groupPendingOrders.map(o=>o.id);setSelectedGroupOrders(ids);
-      const combined={};const included={};
-      groupPendingOrders.forEach(o=>{
-        const delivered=getOrderDelivered(o.id);
-        Object.entries(o.products).forEach(([pid,qty])=>{
-          const rem=Math.max(0,qty-(delivered[pid]||0));
-          combined[pid]=(combined[pid]||0)+rem;
-          if(rem>0)included[pid]=true;
-        });
-      });
-      setProducts(combined);setIncludedProducts(included);
-    }
-  },[selectedGroup,mode]);
+    const seeded={},inc={};
+    lines.forEach(l=>{seeded[l.pid]=Math.max(0,l.remaining);inc[l.pid]=l.remaining>0;});
+    setProducts(seeded);setIncludedProducts(inc);
+  },[seedKey]);
 
-  const toggleGroupOrder=orderId=>{
-    setSelectedGroupOrders(prev=>{
-      const next=prev.includes(orderId)?prev.filter(id=>id!==orderId):[...prev,orderId];
-      const combined={};const included={};
-      groupPendingOrders.filter(o=>next.includes(o.id)).forEach(o=>{
-        const delivered=getOrderDelivered(o.id);
-        Object.entries(o.products).forEach(([pid,qty])=>{
-          const rem=Math.max(0,qty-(delivered[pid]||0));
-          combined[pid]=(combined[pid]||0)+rem;
-          if(rem>0)included[pid]=true;
-        });
+  const toggleCustomerOrder=id=>setSelectedCustomerOrders(prev=>prev.includes(id)?prev.filter(x=>x!==id):[...prev,id]);
+  const toggleGroupOrder=id=>setSelectedGroupOrders(prev=>prev.includes(id)?prev.filter(x=>x!==id):[...prev,id]);
+  const toggleProduct=pid=>setIncludedProducts(prev=>({...prev,[pid]:!prev[pid]}));
+
+  // Auto-select all of a customer's / group's orders when one is picked.
+  useEffect(()=>{ if(mode==='customer') setSelectedCustomerOrders(customerPendingOrders.map(o=>o.id)); },[selectedCustomer,mode]);
+  useEffect(()=>{ if(mode==='group')    setSelectedGroupOrders(groupPendingOrders.map(o=>o.id));    },[selectedGroup,mode]);
+
+  // ── ITEM 8: products added AFTER the order was written ──
+  const extraCandidates = useMemo(()=>{
+    const onOrder=new Set(lines.map(l=>l.pid));
+    const q=extraSearch.trim().toLowerCase();
+    const pool=productsAZ.filter(p=>!onOrder.has(p.id));
+    return q?pool.filter(p=>productDisplayName(p).toLowerCase().includes(q)):pool;
+  },[productsAZ,lines,extraSearch]);
+  const setExtra=(pid,val)=>{const v=num(val);setExtraProducts(e=>v>0?{...e,[pid]:v}:Object.fromEntries(Object.entries(e).filter(([k])=>k!==pid)));};
+
+  // ── ITEM 3.1: over-delivery detection ──
+  const overLines = useMemo(()=>lines
+    .filter(l=>includedProducts[l.pid]&&num(products[l.pid])>l.remaining)
+    .map(l=>({...l,entered:num(products[l.pid]),over:num(products[l.pid])-l.remaining})),[lines,products,includedProducts]);
+  const hasOverage = overLines.length>0;
+  const extraCount = Object.keys(extraProducts).filter(k=>num(extraProducts[k])>0).length;
+
+  const hasSelection = activeOrders.length>0;
+
+  // ── UNIFIED ALLOCATION ──
+  // Distributes each entered quantity across the covered orders, oldest first, capped
+  // at each order's remaining. Any surplus beyond total remaining (over-delivery) is
+  // attached to the LAST order and flagged, rather than being silently dropped.
+  // This single path serves individual, customer and group modes, so the three can
+  // no longer drift apart the way the old duplicated logic did.
+  const allocate=()=>{
+    const perOrder={};activeOrders.forEach(o=>{perOrder[o.id]={};});
+    const overage={};
+    lines.forEach(l=>{
+      if(!includedProducts[l.pid]) return;
+      let toGive=num(products[l.pid]);
+      if(toGive<=0) return;
+      const ordered=[...activeOrders].sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+      ordered.forEach(o=>{
+        if(toGive<=0) return;
+        const already=num(getOrderDelivered(o.id)[l.pid]);
+        const rem=Math.max(0,num(o.products?.[l.pid])-already);
+        if(rem<=0) return;
+        const give=Math.min(rem,toGive);
+        perOrder[o.id][l.pid]=(perOrder[o.id][l.pid]||0)+give;
+        toGive-=give;
       });
-      setProducts(combined);setIncludedProducts(included);return next;
+      if(toGive>0){ // over-delivered
+        const last=ordered[ordered.length-1]||activeOrders[0];
+        if(last){perOrder[last.id][l.pid]=(perOrder[last.id][l.pid]||0)+toGive;overage[l.pid]=(overage[l.pid]||0)+toGive;}
+      }
     });
+    // Item 8: extras go on the earliest covered order and are ALSO written back onto
+    // that order's product list, so ordered-vs-delivered stays reconcilable instead of
+    // showing a phantom over-delivery for something that was never ordered.
+    const extras={};
+    Object.entries(extraProducts).forEach(([pid,q])=>{const v=num(q);if(v>0)extras[pid]=v;});
+    return {perOrder,overage,extras};
   };
 
-  const toggleProduct=(pid)=>setIncludedProducts(prev=>({...prev,[pid]:!prev[pid]}));
+  const save=()=>{
+    if(activeOrders.length===0){alert('Select at least one order');return;}
+    const {perOrder,overage,extras}=allocate();
+    const anyProducts=Object.values(perOrder).some(m=>Object.keys(m).length>0)||Object.keys(extras).length>0;
+    if(!anyProducts&&!(num(pumpsOut)>0)&&!(num(totes)>0)){alert('No products or equipment selected for delivery');return;}
+
+    // Confirm over-delivery explicitly — it has invoicing consequences.
+    if(hasOverage){
+      const detail=overLines.map(l=>{const p=allProducts.find(x=>x.id===l.pid);return `  • ${productDisplayName(p||{name:l.pid})}: ${fmt(l.over)} over`;}).join('\n');
+      if(!confirm(`You are delivering MORE than was ordered:\n\n${detail}\n\nThis will be flagged as "Needs Invoice / Weigh-Back" on the Dashboard.\n\nContinue?`)) return;
+    }
+
+    const target=[...activeOrders].sort((a,b)=>(a.date||'').localeCompare(b.date||''))[0];
+    const sig={deliveredBy,driverSig:driverSig.trim(),customerSig:customerSig.trim(),signedAt:new Date().toISOString()};
+    const ticketProducts={};
+
+    activeOrders.forEach((o,idx)=>{
+      const prods={...perOrder[o.id]};
+      // extras ride along on the earliest order only, so they aren't multiplied
+      if(o.id===target.id) Object.entries(extras).forEach(([pid,q])=>{prods[pid]=(prods[pid]||0)+q;});
+      const isFirst=o.id===target.id;
+      if(Object.keys(prods).length===0&&!isFirst) return;  // nothing to record for this order
+      Object.entries(prods).forEach(([pid,q])=>{ticketProducts[pid]=(ticketProducts[pid]||0)+q;});
+
+      addDelivery({
+        customer:o.customer,orderId:o.id,
+        groupName:mode==='group'?selectedGroup:(mode==='customer'?null:null),
+        date,products:prods,
+        deliveryNum:getOrderDeliveryCount(o.id)+1,
+        notes,                                   // item 7
+        ...sig,                                  // item 9
+        overage:Object.keys(overage).length&&isFirst?overage:undefined,
+        // equipment is recorded once, on the earliest order, so pump totals aren't
+        // multiplied across every order in a multi-order delivery
+        pumpsOut:isFirst?num(pumpsOut):0,pumpsReturnDate:isFirst?pumpsReturnDate:'',pumpsReturnedQty:0,pumpsReturned:false,
+        totes:isFirst?num(totes):0,totesReturnedQty:0,totesReturned:false,
+        attachments:isFirst?attachments:[]
+      });
+
+      // Item 8: write added products back onto the order so it reconciles.
+      const patch={};
+      if(isFirst&&Object.keys(extras).length>0){
+        const merged={...(o.products||{})};
+        Object.entries(extras).forEach(([pid,q])=>{merged[pid]=num(merged[pid])+q;});
+        patch.products=merged;
+      }
+      // Recompute status from ACTUAL delivered totals including this delivery.
+      const prevDel=getOrderDelivered(o.id);
+      const finalProducts=patch.products||o.products||{};
+      const allDone=Object.entries(finalProducts).filter(([,q])=>num(q)>0)
+        .every(([pid,q])=>(num(prevDel[pid])+num(prods[pid]))>=num(q));
+      patch.status=allDone?'paid':'partial-deliver';
+      if(Object.keys(overage).length&&isFirst) patch.hasOverage=true;
+      updateOrder(o.id,patch);
+    });
+
+    saveDeliveryTicket({
+      customer:mode==='group'?`${selectedGroup} (Group)`:(mode==='customer'&&activeOrders.length>1?`${selectedCustomer} (${activeOrders.length} orders)`:target.customer),
+      date,products:ticketProducts,productCount:Object.keys(ticketProducts).length,
+      pumpsOut:num(pumpsOut),totes:num(totes),notes,...sig,
+      orderIds:activeOrders.map(o=>o.id),attachments
+    });
+
+    showToast(hasOverage?'Delivery recorded — overage flagged for invoicing'
+      :`Delivery recorded${activeOrders.length>1?` for ${activeOrders.length} orders`:''}`);
+    onClose();
+  };
 
   // Camera functions
   const startCamera=async()=>{
@@ -1377,87 +2413,183 @@ function NewDeliveryModal({onClose}) {
 
   useEffect(()=>()=>stopCamera(),[]);
 
-  const hasSelection=mode==='individual'?!!selectedOrderObj:selectedGroupOrders.length>0;
-
-  const save=()=>{
-    // Build delivery products: only included products with qty > 0
-    const deliverProducts={};
-    Object.entries(products).forEach(([pid,qty])=>{
-      if(includedProducts[pid]&&qty>0) deliverProducts[pid]=qty;
-    });
-    if(Object.keys(deliverProducts).length===0&&!(parseInt(pumpsOut)>0)&&!(parseInt(totes)>0)){alert('No products or equipment selected for delivery');return;}
-
-    if(mode==='individual'){
-      if(!selectedOrderObj){alert('Select an order');return;}
-      addDelivery({customer:selectedOrderObj.customer,orderId:selectedOrderObj.id,date,products:deliverProducts,deliveryNum,pumpsOut:parseInt(pumpsOut)||0,pumpsReturnDate,pumpsReturned:false,totes:parseInt(totes)||0,totesReturned:false,attachments});
-      saveDeliveryTicket({customer:selectedOrderObj.customer,date,products:{...deliverProducts},pumpsOut:parseInt(pumpsOut)||0,totes:parseInt(totes)||0,productCount:Object.keys(deliverProducts).length,deliveryNum,attachments});
-      // Always auto-update order status based on how much has been delivered
-      const prevDelivered=getOrderDelivered(selectedOrderObj.id);
-      const allDelivered=Object.entries(selectedOrderObj.products).every(([pid,qty])=>{
-        if(qty<=0)return true;
-        return((prevDelivered[pid]||0)+(deliverProducts[pid]||0))>=qty;
-      });
-      updateOrder(selectedOrderObj.id,{status:allDelivered?'paid':'partial-deliver'});
-    } else {
-      if(selectedGroupOrders.length===0){alert('Select at least one order');return;}
-      const ordersToDeliver=groupPendingOrders.filter(o=>selectedGroupOrders.includes(o.id));
-      ordersToDeliver.forEach(o=>{
-        const orderDeliverProducts={};
-        const delivered=getOrderDelivered(o.id);
-        Object.entries(o.products).forEach(([pid,qty])=>{
-          const rem=Math.max(0,qty-(delivered[pid]||0));
-          if(includedProducts[pid]&&rem>0) orderDeliverProducts[pid]=rem;
-        });
-        addDelivery({customer:o.customer,orderId:o.id,groupName:selectedGroup,date,products:orderDeliverProducts,pumpsOut:0,pumpsReturnDate:'',pumpsReturned:false,totes:0,totesReturned:false,attachments:[]});
-        const allDel=Object.entries(o.products).every(([pid,qty])=>qty<=0||((delivered[pid]||0)+(orderDeliverProducts[pid]||0))>=qty);
-        updateOrder(o.id,{status:allDel?'paid':'partial-deliver'});
-      });
-      saveDeliveryTicket({customer:selectedGroup+' (Group)',date,products:{...deliverProducts},pumpsOut:parseInt(pumpsOut)||0,totes:parseInt(totes)||0,productCount:Object.keys(deliverProducts).length,attachments});
-      if((parseInt(pumpsOut)||0)>0||(parseInt(totes)||0)>0){addDelivery({customer:selectedGroup+' (Group)',orderId:'group_'+selectedGroup,groupName:selectedGroup,date,products:{},pumpsOut:parseInt(pumpsOut)||0,pumpsReturnDate,pumpsReturned:false,totes:parseInt(totes)||0,totesReturned:false,attachments});}
-      showToast(`${ordersToDeliver.length} deliveries recorded for ${selectedGroup}`);
-    }
-    onClose();
-  };
+  const users = data.settings?.users||[];
+  const modeBtn=(m,label)=>(
+    <button onClick={()=>{setMode(m);setSelectedOrder('');setSelectedCustomer('');setSelectedGroup('');setSelectedCustomerOrders([]);setSelectedGroupOrders([]);setProducts({});setExtraProducts({});}}
+      style={{padding:'8px 18px',fontSize:13,fontWeight:500,cursor:'pointer',border:'none',borderLeft:m!=='individual'?'1px solid var(--border)':'none',
+              background:mode===m?'var(--primary)':'#fff',color:mode===m?'#fff':'var(--text)'}}>{label}</button>
+  );
 
   return <Modal title="New Delivery" onClose={()=>{stopCamera();onClose();}} wide>
     <div className="modal-body">
       <div style={{display:'flex',gap:0,marginBottom:16,border:'1px solid var(--border)',borderRadius:6,overflow:'hidden',width:'fit-content'}}>
-        <button onClick={()=>{setMode('individual');setSelectedGroup('');setSelectedGroupOrders([]);setProducts({});}} style={{padding:'8px 20px',fontSize:13,fontWeight:500,cursor:'pointer',border:'none',background:mode==='individual'?'var(--primary)':'#fff',color:mode==='individual'?'#fff':'var(--text)'}}>Individual Order</button>
-        <button onClick={()=>{setMode('group');setSelectedOrder('');setProducts({});}} style={{padding:'8px 20px',fontSize:13,fontWeight:500,cursor:'pointer',border:'none',borderLeft:'1px solid var(--border)',background:mode==='group'?'var(--primary)':'#fff',color:mode==='group'?'#fff':'var(--text)'}}>Group Delivery</button>
+        {modeBtn('individual','Individual Order')}
+        {modeBtn('customer','Multiple Orders')}
+        {modeBtn('group','Group Delivery')}
       </div>
+
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
-        {mode==='individual'?<div className="form-group"><label>Select Order</label><select value={selectedOrder} onChange={e=>setSelectedOrder(e.target.value)}><option value="">-- Select an order --</option>{deliverableOrders.map(o=><option key={o.id} value={o.id}>{o.customer} — {fmtDate(o.date)}</option>)}</select></div>
-        :<div className="form-group"><label>Select Group</label><select value={selectedGroup} onChange={e=>setSelectedGroup(e.target.value)}><option value="">-- Select a group --</option>{groupsWithPendingOrders.map(g=><option key={g.name} value={g.name}>{g.name} ({g.members.length} members)</option>)}</select></div>}
+        {mode==='individual'&&<div className="form-group"><label>Select Order</label>
+          <select value={selectedOrder} onChange={e=>setSelectedOrder(e.target.value)}>
+            <option value="">-- Select an order --</option>
+            {deliverableOrders.map(o=><option key={o.id} value={o.id}>{o.customer} — {fmtDate(o.date)}</option>)}
+          </select></div>}
+        {mode==='customer'&&<div className="form-group"><label>Select Customer</label>
+          <select value={selectedCustomer} onChange={e=>setSelectedCustomer(e.target.value)}>
+            <option value="">-- Select a customer --</option>
+            {customersWithOrders.map(c=><option key={c.name} value={c.name}>{c.name} ({c.count} open order{c.count!==1?'s':''})</option>)}
+          </select></div>}
+        {mode==='group'&&<div className="form-group"><label>Select Group</label>
+          <select value={selectedGroup} onChange={e=>setSelectedGroup(e.target.value)}>
+            <option value="">-- Select a group --</option>
+            {groupsWithPendingOrders.map(g=><option key={g.name} value={g.name}>{g.name} ({g.members.length} members)</option>)}
+          </select></div>}
         <div className="form-group"><label>Delivery Date</label><input type="date" value={date} onChange={e=>setDate(e.target.value)}/></div>
       </div>
-      {mode==='group'&&selectedGroupObj&&<div style={{marginTop:12}}><h4 style={{fontSize:14,fontWeight:600,marginBottom:8}}>Select Orders to Deliver</h4><div style={{border:'1px solid var(--border)',borderRadius:6,overflow:'hidden'}}>
-        {groupPendingOrders.length===0?<div style={{padding:16,textAlign:'center',color:'var(--text-secondary)',fontSize:13}}>No pending orders for this group</div>:groupPendingOrders.map(o=>{const st=getStatus(o.status);const pc=Object.keys(o.products).filter(k=>o.products[k]>0).length;return <label key={o.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid #f1f5f9',background:selectedGroupOrders.includes(o.id)?'var(--primary-bg)':''}}>
-          <input type="checkbox" checked={selectedGroupOrders.includes(o.id)} onChange={()=>toggleGroupOrder(o.id)} style={{width:'auto'}}/><span style={{fontWeight:500,flex:1}}>{o.customer}</span><span style={{fontSize:12,color:'var(--text-secondary)'}}>{fmtDate(o.date)}</span><span className="tag">{pc} product{pc!==1?'s':''}</span></label>;})}
-      </div></div>}
+
+      {/* ── ITEM 3: pick which of this customer's orders to deliver ── */}
+      {mode==='customer'&&selectedCustomer&&<div style={{marginTop:4}}>
+        <h4 style={{fontSize:14,fontWeight:600,marginBottom:8}}>Orders for {selectedCustomer}</h4>
+        <div style={{border:'1px solid var(--border)',borderRadius:6,overflow:'hidden'}}>
+          {customerPendingOrders.length===0
+            ? <div style={{padding:16,textAlign:'center',color:'var(--text-secondary)',fontSize:13}}>No open orders for this customer</div>
+            : customerPendingOrders.map(o=>{const st=getStatus(o.status);const pc=Object.keys(o.products||{}).filter(k=>num(o.products[k])>0).length;
+              return <label key={o.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid #f1f5f9',background:selectedCustomerOrders.includes(o.id)?'var(--primary-bg)':''}}>
+                <input type="checkbox" checked={selectedCustomerOrders.includes(o.id)} onChange={()=>toggleCustomerOrder(o.id)} style={{width:'auto'}}/>
+                <span style={{fontWeight:500,flex:1}}>{fmtDate(o.date)}</span>
+                <span className="tag">{pc} product{pc!==1?'s':''}</span>
+                <span className={`status-badge ${st.cls}`}><span className={`status-dot ${st.dot}`}></span>{st.label}</span>
+              </label>;})}
+        </div>
+      </div>}
+
+      {mode==='group'&&selectedGroupObj&&<div style={{marginTop:4}}>
+        <h4 style={{fontSize:14,fontWeight:600,marginBottom:8}}>Select Orders to Deliver</h4>
+        <div style={{border:'1px solid var(--border)',borderRadius:6,overflow:'hidden'}}>
+          {groupPendingOrders.length===0
+            ? <div style={{padding:16,textAlign:'center',color:'var(--text-secondary)',fontSize:13}}>No pending orders for this group</div>
+            : groupPendingOrders.map(o=>{const st=getStatus(o.status);const pc=Object.keys(o.products||{}).filter(k=>num(o.products[k])>0).length;
+              return <label key={o.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',cursor:'pointer',borderBottom:'1px solid #f1f5f9',background:selectedGroupOrders.includes(o.id)?'var(--primary-bg)':''}}>
+                <input type="checkbox" checked={selectedGroupOrders.includes(o.id)} onChange={()=>toggleGroupOrder(o.id)} style={{width:'auto'}}/>
+                <span style={{fontWeight:500,flex:1}}>{o.customer}</span>
+                <span style={{fontSize:12,color:'var(--text-secondary)'}}>{fmtDate(o.date)}</span>
+                <span className="tag">{pc} product{pc!==1?'s':''}</span>
+              </label>;})}
+        </div>
+      </div>}
+
       {hasSelection&&<>
-        {mode==='individual'&&selectedOrderObj&&deliveryNum>1&&<div style={{background:'var(--primary-bg)',border:'1px solid var(--primary-light)',borderRadius:6,padding:'10px 14px',margin:'12px 0',fontSize:13}}>
-          <strong>Delivery #{deliveryNum}</strong> for this order. Quantities below show what remains to be delivered.
-        </div>}
-        <h4 style={{fontSize:14,fontWeight:600,margin:'16px 0 8px'}}>{mode==='group'?'Combined Products':'Products to Deliver'}</h4>
-        <table style={{fontSize:13}}><thead><tr><th style={{width:30,padding:'6px 8px'}}></th><th style={{textAlign:'left'}}>Product</th>{mode==='individual'&&<th style={{textAlign:'right',width:70}}>Ordered</th>}{mode==='individual'&&<th style={{textAlign:'right',width:90}}>Previously Delivered</th>}<th style={{textAlign:'right',width:90}}>Remaining</th><th style={{textAlign:'right',width:100}}>Deliver Now</th></tr></thead><tbody>
-          {Object.entries(mode==='individual'&&selectedOrderObj?selectedOrderObj.products:products).filter(([,v])=>v>0).map(([pid,orderedQty])=>{
-            const p=allProducts.find(x=>x.id===pid);
-            const prevDel=mode==='individual'&&selectedOrderObj?(getOrderDelivered(selectedOrderObj.id)[pid]||0):0;
-            const remaining=mode==='individual'?Math.max(0,orderedQty-prevDel):(products[pid]||0);
-            const included=includedProducts[pid]||false;
-            return <tr key={pid} style={{opacity:included?1:0.4}}>
-              <td style={{padding:'6px 8px'}}><input type="checkbox" checked={included} onChange={()=>toggleProduct(pid)} style={{width:'auto'}}/></td>
-              <td style={{fontWeight:500}}>{productDisplayName(p||{name:pid})}</td>
-              {mode==='individual'&&<td className="inv-cell">{fmt(orderedQty)}</td>}
-              {mode==='individual'&&<td className="inv-cell" style={{color:prevDel>0?'var(--primary)':'var(--text-secondary)'}}>{fmt(prevDel)}</td>}
-              <td className="inv-cell" style={{fontWeight:600,color:remaining>0?'var(--warning)':'var(--success)'}}>{fmt(remaining)}</td>
-              <td style={{textAlign:'right',padding:'4px 8px'}}><input type="number" step="0.1" min="0" max={remaining} style={{width:80,textAlign:'right'}} disabled={!included} value={included?(products[pid]||0):0} onChange={e=>{const v=Math.min(parseFloat(e.target.value)||0,remaining);setProducts(ps=>({...ps,[pid]:v}));}}/></td>
+        {mode==='individual'&&selectedOrderObj&&getOrderDeliveryCount(selectedOrderObj.id)>0&&
+          <div style={{background:'var(--primary-bg)',border:'1px solid var(--primary-light)',borderRadius:6,padding:'10px 14px',margin:'12px 0',fontSize:13}}>
+            <strong>Delivery #{getOrderDeliveryCount(selectedOrderObj.id)+1}</strong> for this order. Quantities below show what remains.
+          </div>}
+        {activeOrders.length>1&&
+          <div style={{background:'var(--primary-bg)',border:'1px solid var(--primary-light)',borderRadius:6,padding:'10px 14px',margin:'12px 0',fontSize:13}}>
+            Delivering <strong>{activeOrders.length} orders</strong> together. Quantities are combined below and allocated across orders oldest-first.
+          </div>}
+
+        <h4 style={{fontSize:14,fontWeight:600,margin:'16px 0 8px'}}>Products to Deliver</h4>
+        <table style={{fontSize:13}}>
+          <thead><tr>
+            <th style={{width:30,padding:'6px 8px'}}></th><th style={{textAlign:'left'}}>Product</th>
+            <th style={{textAlign:'right',width:70}}>Ordered</th>
+            <th style={{textAlign:'right',width:90}}>Prev. Delivered</th>
+            <th style={{textAlign:'right',width:90}}>Remaining</th>
+            <th style={{textAlign:'right',width:110}}>Deliver Now</th>
+          </tr></thead>
+          <tbody>{lines.map(l=>{
+            const p=allProducts.find(x=>x.id===l.pid);
+            const included=!!includedProducts[l.pid];
+            const entered=num(products[l.pid]);
+            const over=entered-l.remaining;
+            return <tr key={l.pid} style={{opacity:included?1:0.4}}>
+              <td style={{padding:'6px 8px'}}><input type="checkbox" checked={included} onChange={()=>toggleProduct(l.pid)} style={{width:'auto'}}/></td>
+              <td style={{fontWeight:500}}>{productDisplayName(p||{name:l.pid})}</td>
+              <td className="inv-cell">{fmt(l.ordered)}</td>
+              <td className="inv-cell" style={{color:l.delivered>0?'var(--primary)':'var(--text-secondary)'}}>{fmt(l.delivered)}</td>
+              <td className="inv-cell" style={{fontWeight:600,color:l.remaining>0?'var(--warning)':'var(--success)'}}>{fmt(l.remaining)}</td>
+              <td style={{textAlign:'right',padding:'4px 8px'}}>
+                {/* ITEM 3.1: the old `max={remaining}` + Math.min() clamp made
+                    over-delivery impossible. Removed — surplus is now allowed and flagged. */}
+                <input type="number" step="0.1" min="0"
+                  style={{width:90,textAlign:'right',borderColor:included&&over>0?'var(--danger)':undefined,
+                          background:included&&over>0?'#fef2f2':undefined}}
+                  disabled={!included} value={included?(products[l.pid]??''):''}
+                  onChange={e=>{const v=num(e.target.value);setProducts(ps=>({...ps,[l.pid]:v}));}}/>
+                {included&&over>0&&<div style={{fontSize:10,color:'var(--danger)',fontWeight:600,marginTop:2}}>+{fmt(over)} over</div>}
+              </td>
             </tr>;})}
-        </tbody></table>
+          </tbody>
+        </table>
+
+        {/* ── ITEM 3.1: overage warning ── */}
+        {hasOverage&&<div style={{marginTop:12,padding:'12px 14px',background:'#fef2f2',border:'1px solid #fecaca',borderRadius:6}}>
+          <div style={{fontSize:13,fontWeight:600,color:'var(--danger)',display:'flex',alignItems:'center',gap:6}}>
+            <Icon name="alert" size={15}/>Delivering more than ordered
+          </div>
+          <div style={{fontSize:12,color:'#991b1b',marginTop:6}}>
+            {overLines.map(l=>{const p=allProducts.find(x=>x.id===l.pid);
+              return <div key={l.pid}>{productDisplayName(p||{name:l.pid})}: <strong>+{fmt(l.over)}</strong> over ordered</div>;})}
+            <div style={{marginTop:6}}>This will be flagged on the Dashboard as <strong>needs invoice or weigh-back</strong>. Use a Return ticket if the excess comes back.</div>
+          </div>
+        </div>}
+
+        {/* ── ITEM 8: add products not on the original order ── */}
+        <div style={{marginTop:16}}>
+          {!showAddProduct
+            ? <button className="btn btn-sm btn-secondary" onClick={()=>setShowAddProduct(true)}><Icon name="plus" size={14}/>Add Product Not On Order</button>
+            : <div style={{border:'1px solid var(--border)',borderRadius:6,padding:12,background:'#f8fafc'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                  <h4 style={{fontSize:13,fontWeight:600}}>Additional Products</h4>
+                  <button className="btn-icon" onClick={()=>{setShowAddProduct(false);setExtraSearch('');}}><Icon name="x" size={14}/></button>
+                </div>
+                <p style={{fontSize:11,color:'var(--text-secondary)',marginBottom:8}}>These are added to the order as well as this delivery, so the order stays reconcilable.</p>
+                <div className="search-box" style={{marginBottom:8}}><Icon name="search"/>
+                  <input placeholder="Search products..." value={extraSearch} onChange={e=>setExtraSearch(e.target.value)}/></div>
+                <div style={{maxHeight:180,overflowY:'auto',display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(230px,1fr))',gap:8}}>
+                  {extraCandidates.slice(0,60).map(p=><div key={p.id} style={{display:'flex',alignItems:'center',gap:8}}>
+                    <span style={{fontSize:12,flex:1,minWidth:0,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{productDisplayName(p)}</span>
+                    <input type="number" step="0.1" min="0" style={{width:75}} placeholder="0" value={extraProducts[p.id]||''} onChange={e=>setExtra(p.id,e.target.value)}/>
+                  </div>)}
+                </div>
+              </div>}
+          {extraCount>0&&<div style={{marginTop:8,fontSize:12,color:'var(--primary)'}}>
+            <strong>{extraCount}</strong> additional product{extraCount!==1?'s':''} will be added to the order.</div>}
+        </div>
+
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginTop:16}}>
-          <div className="form-group"><label>Pumps Out (qty)</label><input type="number" value={pumpsOut} onChange={e=>setPumpsOut(e.target.value)} placeholder="0"/></div>
+          <div className="form-group"><label>Pumps Out (qty)</label><input type="number" min="0" value={pumpsOut} onChange={e=>setPumpsOut(e.target.value)} placeholder="0"/></div>
           <div className="form-group"><label>Pump Return Date</label><input type="date" value={pumpsReturnDate} onChange={e=>setPumpsReturnDate(e.target.value)}/></div>
-          <div className="form-group"><label>Totes (qty)</label><input type="number" value={totes} onChange={e=>setTotes(e.target.value)} placeholder="0"/></div>
+          <div className="form-group"><label>Totes (qty)</label><input type="number" min="0" value={totes} onChange={e=>setTotes(e.target.value)} placeholder="0"/></div>
+        </div>
+
+        {/* ── ITEM 7: delivery notes ── */}
+        <div className="form-group">
+          <label style={{display:'flex',alignItems:'center',gap:5}}><Icon name="note" size={12}/>Notes (printed on the delivery ticket)</label>
+          <textarea rows="3" value={notes} onChange={e=>setNotes(e.target.value)}
+            placeholder="Left in west shed, gate code 4412, call before next delivery..."/>
+        </div>
+
+        {/* ── ITEM 9: electronic signature ── */}
+        <div style={{marginTop:8,padding:16,background:'#f8fafc',borderRadius:8,border:'1px solid var(--border)'}}>
+          <h4 style={{fontSize:14,fontWeight:600,marginBottom:10,display:'flex',alignItems:'center',gap:6}}><Icon name="pen" size={14}/>Signatures</h4>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+            <div className="form-group"><label>Delivered By (user)</label>
+              <select value={deliveredBy} onChange={e=>setDeliveredBy(e.target.value)}>
+                <option value="">-- Select user --</option>
+                {users.map(u=><option key={u} value={u}>{u}</option>)}
+              </select>
+              <p style={{fontSize:10,color:'var(--text-secondary)',marginTop:4}}>Manage users in Settings</p>
+            </div>
+            <div className="form-group"><label>Driver Signature (type full name)</label>
+              <input value={driverSig} onChange={e=>setDriverSig(e.target.value)} placeholder="Type name to sign"
+                style={{fontFamily:driverSig?'Georgia,serif':'inherit',fontStyle:driverSig?'italic':'normal',fontSize:driverSig?15:13}}/></div>
+            <div className="form-group" style={{gridColumn:'1 / -1'}}><label>Customer Signature (type full name)</label>
+              <input value={customerSig} onChange={e=>setCustomerSig(e.target.value)} placeholder="Customer types their name to accept delivery"
+                style={{fontFamily:customerSig?'Georgia,serif':'inherit',fontStyle:customerSig?'italic':'normal',fontSize:customerSig?15:13}}/></div>
+          </div>
+          {(driverSig||customerSig)&&<p style={{fontSize:11,color:'var(--text-secondary)',marginTop:4}}>
+            Signed electronically on {new Date().toLocaleString()}. Typed signatures are recorded with a timestamp and printed on the ticket.</p>}
         </div>
 
         {/* ── PHOTO / VIDEO CAPTURE ── */}
@@ -1484,11 +2616,16 @@ function NewDeliveryModal({onClose}) {
         </div>
 
         <div style={{marginTop:12,padding:'8px 12px',background:'var(--primary-bg)',borderRadius:6,fontSize:12,color:'var(--primary)'}}>
-          Order status will be automatically updated to <strong>Partial Delivery</strong> or <strong>Paid &amp; Delivered</strong> based on quantities entered.
+          Order status updates automatically to <strong>Partial Delivery</strong> or <strong>Paid &amp; Delivered</strong> based on the quantities entered.
         </div>
       </>}
     </div>
-    <div className="modal-footer"><button className="btn btn-secondary" onClick={()=>{stopCamera();onClose();}}>Cancel</button><button className="btn btn-success" onClick={save} disabled={!hasSelection}><Icon name="truck" size={14}/>Record Delivery</button></div>
+    <div className="modal-footer">
+      <button className="btn btn-secondary" onClick={()=>{stopCamera();onClose();}}>Cancel</button>
+      <button className={`btn ${hasOverage?'btn-danger':'btn-success'}`} onClick={save} disabled={!hasSelection}>
+        <Icon name="truck" size={14}/>{hasOverage?'Record Delivery (with overage)':'Record Delivery'}
+      </button>
+    </div>
   </Modal>;
 }
 
@@ -1501,30 +2638,61 @@ function DeliveryTicketModal({delivery,onClose}) {
   const handlePrint=()=>{
     const content=ticketRef.current.innerHTML;
     const win=window.open('','_blank','width=800,height=600');
-    win.document.write(`<!DOCTYPE html><html><head><title>Delivery Ticket - ${delivery.customer}</title><style>body{font-family:'Inter',Arial,sans-serif;padding:40px;color:#1e293b}h2{margin:0 0 4px;font-size:22px}h4{margin:0;font-size:13px;color:#64748b;font-weight:400}table{width:100%;border-collapse:collapse;margin:20px 0}th{text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:2px solid #e2e8f0;font-size:12px;font-weight:600;text-transform:uppercase}td{padding:8px 12px;border-bottom:1px solid #f1f5f9;font-size:14px}.sig{margin-top:60px;display:grid;grid-template-columns:1fr 1fr;gap:40px}.sig-line{border-top:1px solid #1e293b;padding-top:8px;font-size:12px;color:#64748b}.photos{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.photos img{max-width:200px;border-radius:4px}@media print{body{padding:20px}}</style></head><body>${content}</body></html>`);
+    win.document.write(`<!DOCTYPE html><html><head><title>Delivery Ticket - ${delivery.customer}</title><style>body{font-family:'Inter',Arial,sans-serif;padding:40px;color:#1e293b}h2{margin:0 0 4px;font-size:22px}h4{margin:0;font-size:13px;color:#64748b;font-weight:400}table{width:100%;border-collapse:collapse;margin:20px 0}th{text-align:left;padding:10px 12px;background:#f8fafc;border-bottom:2px solid #e2e8f0;font-size:12px;font-weight:600;text-transform:uppercase}td{padding:8px 12px;border-bottom:1px solid #f1f5f9;font-size:14px}.sig{margin-top:60px;display:grid;grid-template-columns:1fr 1fr;gap:40px}.sig-line{border-top:1px solid #1e293b;padding-top:8px;font-size:12px;color:#64748b}.photos{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0}.photos img{max-width:200px;border-radius:4px}.notes-box{margin:16px 0;padding:12px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc}.overage-box{margin:16px 0;padding:12px;border:1px solid #fecaca;background:#fef2f2;border-radius:6px}@media print{body{padding:20px}}</style></head><body>${content}</body></html>`);
     win.document.close();win.print();
   };
-  const productEntries=Object.entries(delivery.products||{}).filter(([,v])=>v>0);
+  const productEntries=Object.entries(delivery.products||{}).filter(([,v])=>num(v)>0);
   const atts=delivery.attachments||[];
+  const sigStamp = delivery.signedAt?new Date(delivery.signedAt).toLocaleString():null;
   return <Modal title="Delivery Ticket" onClose={onClose} wide>
     <div className="modal-body"><div ref={ticketRef}>
       <div style={{textAlign:'center',marginBottom:24,paddingBottom:16,borderBottom:'2px solid #1e293b'}}><h2>Quantum Ag — Delivery Ticket</h2><h4>BWF Product Delivery</h4></div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:20}}>
         <p style={{fontSize:14}}><strong>Customer:</strong> {delivery.customer}</p>
         <p style={{fontSize:14}}><strong>Delivery Date:</strong> {fmtDate(delivery.date)}</p>
-        {delivery.pumpsOut>0&&<p style={{fontSize:14}}><strong>Pumps Out:</strong> {delivery.pumpsOut}{delivery.pumpsReturnDate?` (return by ${fmtDate(delivery.pumpsReturnDate)})`:''}</p>}
-        {delivery.totes>0&&<p style={{fontSize:14}}><strong>Totes:</strong> {delivery.totes}</p>}
+        {delivery.deliveredBy&&<p style={{fontSize:14}}><strong>Delivered By:</strong> {delivery.deliveredBy}</p>}
+        {num(delivery.pumpsOut)>0&&<p style={{fontSize:14}}><strong>Pumps Out:</strong> {fmt(num(delivery.pumpsOut))}{delivery.pumpsReturnDate?` (return by ${fmtDate(delivery.pumpsReturnDate)})`:''}</p>}
+        {num(delivery.totes)>0&&<p style={{fontSize:14}}><strong>Totes:</strong> {fmt(num(delivery.totes))}</p>}
       </div>
       {productEntries.length>0&&<table><thead><tr><th>Product</th><th style={{textAlign:'right'}}>Quantity</th></tr></thead><tbody>
-        {productEntries.map(([pid,qty])=>{const p=allProducts.find(x=>x.id===pid);return <tr key={pid}><td>{productDisplayName(p||{name:pid})}</td><td style={{textAlign:'right',fontWeight:600}}>{fmt(qty)}</td></tr>;})}
+        {productEntries.map(([pid,qty])=>{const p=allProducts.find(x=>x.id===pid);return <tr key={pid}><td>{productDisplayName(p||{name:pid})}</td><td style={{textAlign:'right',fontWeight:600}}>{fmt(num(qty))}</td></tr>;})}
       </tbody></table>}
+
+      {/* Overage disclosure — an over-delivered ticket must say so in print */}
+      {delivery.overage&&Object.keys(delivery.overage).length>0&&<div className="overage-box" style={{margin:'16px 0',padding:12,border:'1px solid #fecaca',background:'#fef2f2',borderRadius:6}}>
+        <strong style={{fontSize:13,color:'#b91c1c'}}>Delivered above ordered quantity — to be invoiced or weighed back:</strong>
+        <ul style={{margin:'6px 0 0 18px',fontSize:13,color:'#991b1b'}}>
+          {Object.entries(delivery.overage).map(([pid,q])=>{const p=allProducts.find(x=>x.id===pid);
+            return <li key={pid}>{productDisplayName(p||{name:pid})}: +{fmt(num(q))}</li>;})}
+        </ul>
+      </div>}
+
+      {/* ── ITEM 7: notes on the ticket ── */}
+      {delivery.notes&&<div className="notes-box" style={{margin:'16px 0',padding:12,border:'1px solid #e2e8f0',borderRadius:6,background:'#f8fafc'}}>
+        <strong style={{fontSize:12,textTransform:'uppercase',letterSpacing:.5,color:'#64748b'}}>Notes</strong>
+        <p style={{fontSize:14,marginTop:6,whiteSpace:'pre-wrap'}}>{delivery.notes}</p>
+      </div>}
+
       {atts.length>0&&<div><h4 style={{fontSize:13,fontWeight:600,margin:'16px 0 8px'}}>Attached Photos/Video</h4><div className="photos" style={{display:'flex',flexWrap:'wrap',gap:8}}>
-        {atts.filter(a=>a.type==='photo').map((a,i)=><img key={i} src={a.data} style={{maxWidth:200,borderRadius:4}}/>)}
+        {atts.filter(a=>a.type==='photo'&&a.data).map((a,i)=><img key={i} src={a.data} style={{maxWidth:200,borderRadius:4}}/>)}
       </div></div>}
-      <div style={{marginTop:60,display:'grid',gridTemplateColumns:'1fr 1fr',gap:40}}>
-        <div><div style={{borderTop:'1px solid #1e293b',paddingTop:8,fontSize:12,color:'#64748b'}}>Driver Signature</div></div>
-        <div><div style={{borderTop:'1px solid #1e293b',paddingTop:8,fontSize:12,color:'#64748b'}}>Customer Signature</div></div>
+
+      {/* ── ITEM 9: electronic signatures ── */}
+      <div style={{marginTop:50,display:'grid',gridTemplateColumns:'1fr 1fr',gap:40}}>
+        <div>
+          <div style={{minHeight:34,fontFamily:'Georgia,serif',fontStyle:'italic',fontSize:19,paddingBottom:2}}>{delivery.driverSig||''}</div>
+          <div style={{borderTop:'1px solid #1e293b',paddingTop:8,fontSize:12,color:'#64748b'}}>
+            Driver Signature{delivery.deliveredBy?` — ${delivery.deliveredBy}`:''}
+          </div>
+        </div>
+        <div>
+          <div style={{minHeight:34,fontFamily:'Georgia,serif',fontStyle:'italic',fontSize:19,paddingBottom:2}}>{delivery.customerSig||''}</div>
+          <div style={{borderTop:'1px solid #1e293b',paddingTop:8,fontSize:12,color:'#64748b'}}>Customer Signature</div>
+        </div>
       </div>
+      {sigStamp&&(delivery.driverSig||delivery.customerSig)&&
+        <p style={{fontSize:11,color:'#94a3b8',marginTop:10}}>Signed electronically {sigStamp}</p>}
+
       <div style={{marginTop:40,paddingTop:16,borderTop:'1px solid #e2e8f0',fontSize:12,color:'#94a3b8',textAlign:'center'}}>Quantum Ag — Generated {new Date().toLocaleDateString()}</div>
     </div></div>
     <div className="modal-footer"><button className="btn btn-secondary" onClick={onClose}>Close</button><button className="btn btn-primary" onClick={handlePrint}><Icon name="printer" size={14}/>Print / Save PDF</button></div>
@@ -1589,6 +2757,30 @@ function SettingsScreen() {
       </tbody></table></div>
     </div>
     {showCustomerModal&&<CustomerModal customerName={editCustomerName} onClose={()=>setShowCustomerModal(false)}/>}
+
+    {/* ── ITEM 9: USERS (populate the "Delivered By" dropdown on delivery tickets) ── */}
+    <div className="card"><div className="card-header"><h3>Users</h3>
+      <button className="btn btn-primary btn-sm" onClick={()=>{
+        const n=prompt('Add user name (appears in the "Delivered By" dropdown on delivery tickets):');
+        if(n&&n.trim()){
+          const list=data.settings?.users||[];
+          if(list.includes(n.trim())){showToast('User already exists');return;}
+          updateSettings({users:[...list,n.trim()].sort()});showToast('User added');
+        }
+      }}><Icon name="plus" size={14}/>Add User</button></div>
+      <p style={{fontSize:12,color:'var(--text-secondary)',marginBottom:10}}>These names appear in the <strong>Delivered By</strong> and <strong>Received By</strong> selectors on delivery and return tickets.</p>
+      <table><thead><tr><th>Name</th><th></th></tr></thead><tbody>
+        {(data.settings?.users||[]).length===0
+          ? <tr><td colSpan="2" style={{color:'var(--text-secondary)',fontSize:13,padding:16}}>No users yet.</td></tr>
+          : (data.settings?.users||[]).map(u=><tr key={u}>
+              <td style={{fontWeight:500}}>{u}</td>
+              <td style={{textAlign:'right'}}><button className="btn-icon" onClick={()=>{
+                const list=(data.settings?.users||[]).filter(x=>x!==u);
+                if(list.length===0){showToast('Keep at least one user');return;}
+                if(confirm(`Remove ${u}? Existing tickets keep their recorded name.`)) updateSettings({users:list});
+              }}><Icon name="trash" size={14}/></button></td></tr>)}
+      </tbody></table>
+    </div>
 
     {/* Customer Groups */}
     <div className="card"><div className="card-header"><h3>Customer Groups</h3><button className="btn btn-primary btn-sm" onClick={()=>{setEditGroup(null);setShowGroupModal(true);}}><Icon name="plus" size={14}/>Add Group</button></div>
@@ -1741,7 +2933,7 @@ function App() {
   const [sidebarOpen,setSidebarOpen] = useState(false);
   const navigate=(pg,arg)=>{setPage(pg);setPageArg(arg||null);setSidebarOpen(false);};
   const navItems=[{id:'dashboard',label:'Dashboard',icon:'dashboard'},{id:'inventory',label:'Inventory',icon:'inventory'},{id:'orders',label:'Orders',icon:'orders'},{id:'deliveries',label:'Deliveries',icon:'truck'},{id:'customers',label:'Customers',icon:'users'},{id:'settings',label:'Settings',icon:'settings'}];
-  const renderPage=()=>{switch(page){case'dashboard':return<Dashboard/>;case'inventory':return<InventoryScreen/>;case'orders':return<OrdersScreen onNavigate={navigate}/>;case'deliveries':return<DeliveriesScreen onNavigate={navigate}/>;case'customers':return<CustomersScreen onNavigate={navigate}/>;case'customer-detail':return<CustomerDetail customerName={pageArg} onBack={()=>navigate('customers')}/>;case'settings':return<SettingsScreen/>;default:return<Dashboard/>;}};
+  const renderPage=()=>{switch(page){case'dashboard':return<Dashboard onNavigate={navigate}/>;case'inventory':return<InventoryScreen onNavigate={navigate}/>;case'orders':return<OrdersScreen onNavigate={navigate} navArg={pageArg}/>;case'deliveries':return<DeliveriesScreen onNavigate={navigate} navArg={pageArg}/>;case'customers':return<CustomersScreen onNavigate={navigate}/>;case'customer-detail':return<CustomerDetail customerName={pageArg} onBack={()=>navigate('customers')} onNavigate={navigate}/>;case'settings':return<SettingsScreen/>;default:return<Dashboard onNavigate={navigate}/>;}};
   return <>
     <div className="mobile-header"><button className="hamburger" onClick={()=>setSidebarOpen(!sidebarOpen)}><Icon name="menu" size={24}/></button><h1>Quantum Ag</h1><div style={{width:24}}></div></div>
     <div className={`sidebar ${sidebarOpen?'open':''}`}>
